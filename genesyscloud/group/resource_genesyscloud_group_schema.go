@@ -53,6 +53,11 @@ var (
 				Type:        schema.TypeBool,
 				Optional:    true,
 			},
+			"language_preference": {
+				Description: "The language preference for the group. Used for group voicemail transcription. (e.g. en-us) *Required if includeEmailTranscriptions is true",
+				Type:        schema.TypeString,
+				Optional:    true,
+			},
 		},
 	}
 )

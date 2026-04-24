@@ -473,6 +473,7 @@ func TestAccResourceGroupVoicemailPolicy(t *testing.T) {
 							util.TrueValue,
 							util.TrueValue,
 							util.FalseValue, //disabled at org level (test org)
+							util.NullValue,
 						),
 					),
 				Check: resource.ComposeTestCheckFunc(
@@ -480,6 +481,7 @@ func TestAccResourceGroupVoicemailPolicy(t *testing.T) {
 					resource.TestCheckResourceAttr("genesyscloud_group."+groupResourceLabel1, "voicemail_policy.0.send_email_notifications", util.TrueValue),
 					resource.TestCheckResourceAttr("genesyscloud_group."+groupResourceLabel1, "voicemail_policy.0.disable_email_pii", util.TrueValue),
 					resource.TestCheckResourceAttr("genesyscloud_group."+groupResourceLabel1, "voicemail_policy.0.include_email_transcriptions", util.FalseValue),
+					resource.TestCheckResourceAttr("genesyscloud_group."+groupResourceLabel1, "voicemail_policy.0.language_preference", util.NullValue),
 				),
 			},
 			{
@@ -502,6 +504,7 @@ func TestAccResourceGroupVoicemailPolicy(t *testing.T) {
 							util.FalseValue,
 							util.TrueValue,
 							util.FalseValue,
+							util.NullValue,
 						),
 					),
 				Check: resource.ComposeTestCheckFunc(
@@ -509,6 +512,7 @@ func TestAccResourceGroupVoicemailPolicy(t *testing.T) {
 					resource.TestCheckResourceAttr("genesyscloud_group."+groupResourceLabel1, "voicemail_policy.0.send_email_notifications", util.FalseValue),
 					resource.TestCheckResourceAttr("genesyscloud_group."+groupResourceLabel1, "voicemail_policy.0.disable_email_pii", util.TrueValue),
 					resource.TestCheckResourceAttr("genesyscloud_group."+groupResourceLabel1, "voicemail_policy.0.include_email_transcriptions", util.FalseValue),
+					resource.TestCheckResourceAttr("genesyscloud_group."+groupResourceLabel1, "voicemail_policy.0.language_preference", util.NullValue),
 				),
 			},
 			{
@@ -531,6 +535,7 @@ func TestAccResourceGroupVoicemailPolicy(t *testing.T) {
 							util.FalseValue,
 							util.FalseValue,
 							util.FalseValue,
+							util.NullValue,
 						),
 					),
 				Check: resource.ComposeTestCheckFunc(
@@ -538,6 +543,7 @@ func TestAccResourceGroupVoicemailPolicy(t *testing.T) {
 					resource.TestCheckResourceAttr("genesyscloud_group."+groupResourceLabel1, "voicemail_policy.0.send_email_notifications", util.FalseValue),
 					resource.TestCheckResourceAttr("genesyscloud_group."+groupResourceLabel1, "voicemail_policy.0.disable_email_pii", util.FalseValue),
 					resource.TestCheckResourceAttr("genesyscloud_group."+groupResourceLabel1, "voicemail_policy.0.include_email_transcriptions", util.FalseValue),
+					resource.TestCheckResourceAttr("genesyscloud_group."+groupResourceLabel1, "voicemail_policy.0.language_preference", util.NullValue),
 				),
 			},
 			{

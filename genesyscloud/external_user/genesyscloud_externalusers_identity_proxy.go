@@ -27,6 +27,7 @@ type deleteExternalUserIdentityFunc func(ctx context.Context, p *externalUserIde
 type externalUserIdentityProxy struct {
 	clientConfig                    *platformclientv2.Configuration
 	externalUserApi                 *platformclientv2.UsersApi
+	scimUserApi                     *platformclientv2.SCIMApi
 	createExternalUserIdentityAttr  createExternalUserIdentityFunc
 	getAllExternalUserIdentityAttr  getAllExternalUserIdentityFunc
 	getExternalUserIdentityByIdAttr getExternalUserIdentityByIdFunc
@@ -36,10 +37,12 @@ type externalUserIdentityProxy struct {
 
 func newExternalUserIdentityProxy(clientConfig *platformclientv2.Configuration) *externalUserIdentityProxy {
 	api := platformclientv2.NewUsersApiWithConfig(clientConfig)
+	scimApi := platformclientv2.NewSCIMApiWithConfig(clientConfig)
 	externalUserIdentityCache := rc.NewResourceCache[platformclientv2.Userexternalidentifier]()
 	return &externalUserIdentityProxy{
 		clientConfig:                    clientConfig,
 		externalUserApi:                 api,
+		scimUserApi:                     scimApi,
 		createExternalUserIdentityAttr:  createExternalUserIdentityFn,
 		getAllExternalUserIdentityAttr:  getAllExternalUserIdentityFn,
 		getExternalUserIdentityByIdAttr: getExternalUserIdentityByIdFn,
@@ -126,8 +129,21 @@ func getExternalUserIdentityByIdFn(ctx context.Context, p *externalUserIdentityP
 func deleteExternalUserIdentityFn(ctx context.Context, p *externalUserIdentityProxy, userId, authorityName, externalKey string) (*platformclientv2.APIResponse, error) {
 	// Set resource context for SDK debug logging
 	ctx = provider.EnsureResourceContext(ctx, ResourceType)
+	req := platformclientv2.Scimv2patchrequest{
+		Schemas: &[]string{
+			"urn:ietf:params:scim:api:messages:2.0:PatchOp",
+		},
+		Operations: &[]platformclientv2.Scimv2patchoperation{
+			{
+				Op: platformclientv2.String("remove"),
+				Path: platformclientv2.String(
+					`urn:ietf:params:scim:schemas:extension:genesys:purecloud:2.0:User:externalIds[authority eq "` + authorityName + `"]`,
+				),
+			},
+		},
+	}
 
-	apiResponse, err := p.externalUserApi.DeleteUserExternalidAuthorityNameExternalKey(userId, authorityName, externalKey)
+	_, apiResponse, err := p.scimUserApi.PatchScimV2User(userId, req, "")
 	rc.DeleteCacheItem(p.externalUserIdentityCache, createCompoundKey(userId, authorityName, externalKey))
 	return apiResponse, err
 }

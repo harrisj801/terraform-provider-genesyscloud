@@ -89,7 +89,7 @@ resource "genesyscloud_routing_utilization" "org-utilization" {
 
 Required:
 
-- `maximum_capacity` (Number) Maximum capacity of conversations of this media type. Value must be between 0 and 25.
+- `maximum_capacity` (Number) Maximum capacity of conversations of this media type. Value must be between 0 and 50.
 
 Optional:
 
@@ -102,7 +102,7 @@ Optional:
 
 Required:
 
-- `maximum_capacity` (Number) Maximum capacity of conversations of this media type. Value must be between 0 and 25.
+- `maximum_capacity` (Number) Maximum capacity of conversations of this media type. Value must be between 0 and 50.
 
 Optional:
 
@@ -115,7 +115,7 @@ Optional:
 
 Required:
 
-- `maximum_capacity` (Number) Maximum capacity of conversations of this media type. Value must be between 0 and 25.
+- `maximum_capacity` (Number) Maximum capacity of conversations of this media type. Value must be between 0 and 50.
 
 Optional:
 
@@ -128,7 +128,7 @@ Optional:
 
 Required:
 
-- `maximum_capacity` (Number) Maximum capacity of conversations of this media type. Value must be between 0 and 25.
+- `maximum_capacity` (Number) Maximum capacity of conversations of this media type. Value must be between 0 and 50.
 
 Optional:
 
@@ -142,7 +142,7 @@ Optional:
 Required:
 
 - `label_id` (String) Id of the label being configured.
-- `maximum_capacity` (Number) Maximum capacity of conversations with this label. Value must be between 0 and 25.
+- `maximum_capacity` (Number) Maximum capacity of conversations with this label. Value must be between 0 and 50.
 
 Optional:
 
@@ -154,7 +154,7 @@ Optional:
 
 Required:
 
-- `maximum_capacity` (Number) Maximum capacity of conversations of this media type. Value must be between 0 and 25.
+- `maximum_capacity` (Number) Maximum capacity of conversations of this media type. Value must be between 0 and 50.
 
 Optional:
 

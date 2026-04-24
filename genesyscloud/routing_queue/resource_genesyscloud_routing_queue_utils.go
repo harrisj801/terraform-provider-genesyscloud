@@ -550,8 +550,12 @@ func buildSdkConditionalGroupActivation(d *schema.ResourceData) *platformclientv
 		if !ok {
 			continue
 		}
-
-		resourcedata.BuildSDKInterfaceArrayValueIfNotNil(&sdkCga.PilotRule, cgaMap, "pilot_rule", buildCgaPilotRule)
+		v, exists := cgaMap["pilot_rule"]
+		if exists && v != nil {
+			if slice, ok := v.([]interface{}); ok && len(slice) > 0 {
+				resourcedata.BuildSDKInterfaceArrayValueIfNotNil(&sdkCga.PilotRule, cgaMap, "pilot_rule", buildCgaPilotRule)
+			}
+		}
 		resourcedata.BuildSDKInterfaceArrayValueIfNotNil(&sdkCga.Rules, cgaMap, "rules", buildCgaNumberedRules)
 	}
 

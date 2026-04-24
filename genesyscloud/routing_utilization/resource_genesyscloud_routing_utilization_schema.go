@@ -8,11 +8,12 @@ package routing_utilization
 
 import (
 	"fmt"
+	"strings"
+	"time"
+
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/provider"
 	resourceExporter "github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/resource_exporter"
 	registrar "github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/resource_register"
-	"strings"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
@@ -39,10 +40,10 @@ var (
 	UtilizationSettingsResource = &schema.Resource{
 		Schema: map[string]*schema.Schema{
 			"maximum_capacity": {
-				Description:  "Maximum capacity of conversations of this media type. Value must be between 0 and 25.",
+				Description:  "Maximum capacity of conversations of this media type. Value must be between 0 and 50.",
 				Type:         schema.TypeInt,
 				Required:     true,
-				ValidateFunc: validation.IntBetween(0, 25),
+				ValidateFunc: validation.IntBetween(0, 50),
 			},
 			"interruptible_media_types": {
 				Description: fmt.Sprintf("Set of other media types that can interrupt this media type (%s).", strings.Join(getSdkUtilizationTypes(), " | ")),
@@ -67,10 +68,10 @@ var (
 				Required:    true,
 			},
 			"maximum_capacity": {
-				Description:  "Maximum capacity of conversations with this label. Value must be between 0 and 25.",
+				Description:  "Maximum capacity of conversations with this label. Value must be between 0 and 50.",
 				Type:         schema.TypeInt,
 				Required:     true,
-				ValidateFunc: validation.IntBetween(0, 25),
+				ValidateFunc: validation.IntBetween(0, 50),
 			},
 			"interrupting_label_ids": {
 				Description: "Set of other labels that can interrupt this label.",

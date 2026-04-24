@@ -159,6 +159,7 @@ func buildSdkGroupVoicemailPolicy(d *schema.ResourceData) *platformclientv2.Voic
 	sdkVoicemailPolicy.SendEmailNotifications = resourcedata.GetNillableValueFromMap[bool](voicemailPolicyMap, "send_email_notifications", true)
 	sdkVoicemailPolicy.DisableEmailPii = resourcedata.GetNillableValueFromMap[bool](voicemailPolicyMap, "disable_email_pii", true)
 	sdkVoicemailPolicy.IncludeEmailTranscriptions = resourcedata.GetNillableValueFromMap[bool](voicemailPolicyMap, "include_email_transcriptions", true)
+	sdkVoicemailPolicy.LanguagePreference = resourcedata.GetNillableValueFromMap[string](voicemailPolicyMap, "language_preference", true)
 
 	return &sdkVoicemailPolicy
 }
@@ -169,6 +170,7 @@ func flattenGroupVoicemailPolicy(sdkVoicemailPolicy *platformclientv2.Voicemailg
 	resourcedata.SetMapValueIfNotNil(voicemailPolicyMap, "send_email_notifications", sdkVoicemailPolicy.SendEmailNotifications)
 	resourcedata.SetMapValueIfNotNil(voicemailPolicyMap, "disable_email_pii", sdkVoicemailPolicy.DisableEmailPii)
 	resourcedata.SetMapValueIfNotNil(voicemailPolicyMap, "include_email_transcriptions", sdkVoicemailPolicy.IncludeEmailTranscriptions)
+	resourcedata.SetMapValueIfNotNil(voicemailPolicyMap, "language_preference", sdkVoicemailPolicy.LanguagePreference)
 
 	return []any{voicemailPolicyMap}
 }
@@ -215,11 +217,12 @@ func generateGroupMembers(userIDs ...string) string {
 	`, strings.Join(userIDs, ","))
 }
 
-func generateGroupVoicemailPolicy(sendEmailNotifications, disableEmailPii, includeEmailTranscriptions string) string {
+func generateGroupVoicemailPolicy(sendEmailNotifications, disableEmailPii, includeEmailTranscriptions, languagePreference string) string {
 	return fmt.Sprintf(`voicemail_policy {
 		send_email_notifications = %s
 		disable_email_pii = %s
 		include_email_transcriptions = %s
+		language_preference = %s
 	}
-	`, sendEmailNotifications, disableEmailPii, includeEmailTranscriptions)
+	`, sendEmailNotifications, disableEmailPii, includeEmailTranscriptions, languagePreference)
 }

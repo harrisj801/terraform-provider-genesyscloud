@@ -121,4 +121,4 @@ Optional:
 - `disable_email_pii` (Boolean) Removes any PII from group emails. This is overridden by the analogous organization configuration value. This is always true if HIPAA is enabled or unknown for an organization.
 - `include_email_transcriptions` (Boolean) Whether to include the voicemail transcription in a group notification email.
 - `send_email_notifications` (Boolean) Whether email notifications are sent to group members when a new voicemail is received.
-
+- `language_preference` (String) The language preference for the group. Used for group voicemail transcription. (Required if include_email_transcriptions is true)
