@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -51,7 +52,7 @@ func getPhoneFromResourceData(ctx context.Context, pp *phoneProxy, d *schema.Res
 		return phoneConfig, fmt.Errorf("failed to get line base settings for %s: %s", *phoneConfig.Name, err)
 	}
 	lineBaseSettings := &platformclientv2.Domainentityref{Id: &lineBaseSettingsID}
-	lines, isStandalone, lineError := buildSdkLines(ctx, pp, d, lineBaseSettings)
+	lines, isStandalone, lineError := buildSdkLines(ctx, pp, d, lineBaseSettings, *phoneConfig.Name)
 	if lineError != nil {
 		return phoneConfig, fmt.Errorf("failed to create lines for %s: %s", *phoneConfig.Name, lineError)
 	}
@@ -199,24 +200,26 @@ func flattenPhoneCapabilities(capabilities *platformclientv2.Phonecapabilities) 
 	return []interface{}{capabilitiesMap}
 }
 
-func buildSdkLines(ctx context.Context, pp *phoneProxy, d *schema.ResourceData, lineBaseSettings *platformclientv2.Domainentityref) (linesPtr *[]platformclientv2.Line, isStandAlone bool, err error) {
+func buildSdkLines(ctx context.Context, pp *phoneProxy, d *schema.ResourceData, lineBaseSettings *platformclientv2.Domainentityref, phoneName string) (linesPtr *[]platformclientv2.Line, isStandAlone bool, err error) {
 	lines := []platformclientv2.Line{}
 	lineAddress, remoteAddress := getLineProperties(d)
 	if len(*lineAddress) > 0 && len(*remoteAddress) > 0 {
 		return linesPtr, false, fmt.Errorf("remote stations cannot be standalone phones, line_address and remote_address cannot exist at the same time")
 	}
 	if len(*lineAddress) > 0 {
-		linesPtr = createStandalonePhoneLines(*lineAddress, &lines, lineBaseSettings)
+		linesPtr = createStandalonePhoneLines(*lineAddress, &lines, lineBaseSettings, phoneName)
 		isStandAlone = true
 		return linesPtr, isStandAlone, nil
 	}
 	if len(*remoteAddress) > 0 {
-		linesPtr = createNonStandalonePhoneLine(*remoteAddress, &lines, lineBaseSettings)
+		linesPtr = createNonStandalonePhoneLine(*remoteAddress, &lines, lineBaseSettings, phoneName)
 		isStandAlone = false
 		return linesPtr, isStandAlone, nil
 	}
 	// If line_addresses is not provided, phone is not standalone
-	lineName := "line_" + *lineBaseSettings.Id + util.GetUniqueString()
+	var sanitize = regexp.MustCompile(`[^\w\-]`)
+	rawName := fmt.Sprintf("%s_%d", phoneName, 1)
+	lineName := sanitize.ReplaceAllString(rawName, "")
 	line := platformclientv2.Line{
 		Name:             &lineName,
 		LineBaseSettings: lineBaseSettings,
@@ -277,10 +280,12 @@ func generatePhoneProperties(hardware_id string) string {
 					)))),
 	)
 }
-func createNonStandalonePhoneLine(remoteAddress []interface{}, linesPtr *[]platformclientv2.Line, lineBaseSettings *platformclientv2.Domainentityref) *[]platformclientv2.Line {
+func createNonStandalonePhoneLine(remoteAddress []interface{}, linesPtr *[]platformclientv2.Line, lineBaseSettings *platformclientv2.Domainentityref, phoneName string) *[]platformclientv2.Line {
 	lines := *linesPtr
-	for _, eachAddress := range remoteAddress {
-		lineName := "line_" + *lineBaseSettings.Id + "_" + util.GetUniqueString()
+	var sanitize = regexp.MustCompile(`[^\w\-]`)
+	for i, eachAddress := range remoteAddress {
+		rawName := fmt.Sprintf("%s_%d", phoneName, i+1)
+		lineName := sanitize.ReplaceAllString(rawName, "")
 		properties := map[string]interface{}{
 			"station_remote_address": &map[string]interface{}{
 				"value": &map[string]interface{}{
@@ -296,10 +301,12 @@ func createNonStandalonePhoneLine(remoteAddress []interface{}, linesPtr *[]platf
 	}
 	return &lines
 }
-func createStandalonePhoneLines(lineAddress []interface{}, linesPtr *[]platformclientv2.Line, lineBaseSettings *platformclientv2.Domainentityref) *[]platformclientv2.Line {
+func createStandalonePhoneLines(lineAddress []interface{}, linesPtr *[]platformclientv2.Line, lineBaseSettings *platformclientv2.Domainentityref, phoneName string) *[]platformclientv2.Line {
 	lines := *linesPtr
-	for _, eachLineAddress := range lineAddress {
-		lineName := "line_" + *lineBaseSettings.Id + "_" + util.GetUniqueString()
+	var sanitize = regexp.MustCompile(`[^\w\-]`)
+	for i, eachLineAddress := range lineAddress {
+		rawName := fmt.Sprintf("%s_%d", phoneName, i+1)
+		lineName := sanitize.ReplaceAllString(rawName, "")
 		properties := map[string]interface{}{
 			"station_identity_address": &map[string]interface{}{
 				"value": &map[string]interface{}{
