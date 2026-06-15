@@ -430,7 +430,7 @@ func TestAccResourcePhoneStandalone(t *testing.T) {
 					"genesyscloud_telephony_providers_edges_phonebasesettings." + phoneBaseSettingsResourceLabel + ".id",
 					"", // no web rtc user
 					"genesyscloud_telephony_providers_edges_did_pool." + didPoolResourceLabel1,
-				}, capabilities, generateLinePropertiesLineAddress(strconv.Quote(lineAddresses)), generatePhoneProperties(uuid.NewString())),
+				}, capabilities, generateLinePropertiesLineAddress(uuid.NewString(), strconv.Quote(lineAddresses)), generatePhoneProperties(uuid.NewString())),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr("genesyscloud_telephony_providers_edges_phone."+phoneResourceLabel, "name", name1),
 					resource.TestCheckResourceAttr("genesyscloud_telephony_providers_edges_phone."+phoneResourceLabel, "state", stateActive),
@@ -530,7 +530,7 @@ func TestAccResourcePhoneStandaloneRemoteStation(t *testing.T) {
 		"genesyscloud_telephony_providers_edges_phonebasesettings." + phoneBaseSettingsResourceLabel + ".id",
 		"", // no web rtc user
 		"", // no depends on
-	}, capabilities, generateLinePropertiesRemoteAddress(strconv.Quote(remoteStationAddress)), generatePhoneProperties(uuid.NewString()))
+	}, capabilities, generateLinePropertiesRemoteAddress(uuid.NewString(), strconv.Quote(remoteStationAddress)), generatePhoneProperties(uuid.NewString()))
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:          func() { util.TestAccPreCheck(t) },
