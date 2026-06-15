@@ -11,7 +11,6 @@ import (
 	resourceExporter "github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/resource_exporter"
 	registrar "github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/resource_register"
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/util"
-	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/validators"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
@@ -38,18 +37,21 @@ func SetRegistrar(l registrar.Registrar) {
 func ResourcePhone() *schema.Resource {
 	lineProperties := &schema.Resource{
 		Schema: map[string]*schema.Schema{
+			`line_id`: {
+				Description: `Line ID associated to the line`,
+				Type:        schema.TypeString,
+				Computed:    true,
+			},
 			`line_address`: {
 				Description: `DID for standalone phones. Each phone number must be in an E.164 phone number format.`,
 				Optional:    true,
 				Computed:    true,
-				Type:        schema.TypeList,
-				Elem:        &schema.Schema{Type: schema.TypeString, ValidateDiagFunc: validators.ValidatePhoneNumber},
+				Type:        schema.TypeString,
 			},
 			`remote_address`: {
 				Description: `Station remote property for phones. No validation is provided`,
 				Optional:    true,
-				Type:        schema.TypeList,
-				Elem:        &schema.Schema{Type: schema.TypeString, ValidateFunc: validation.StringIsNotEmpty},
+				Type:        schema.TypeString,
 			},
 		},
 	}
@@ -170,7 +172,7 @@ func ResourcePhone() *schema.Resource {
 				Description: "line properties",
 				Type:        schema.TypeList,
 				Optional:    true,
-				MaxItems:    1,
+				MaxItems:    12,
 				Elem:        lineProperties,
 			},
 			"capabilities": {
