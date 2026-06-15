@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -14,7 +16,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 
-	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/util/lists"
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/util/resourcedata"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -30,6 +31,13 @@ type PhoneConfig struct {
 	PhoneBaseSettingsId string
 	WebRtcUserId        string
 	DependsOn           string
+}
+
+// add this near the top of the file
+type linePropertyConfig struct {
+	LineID        string
+	LineAddress   string
+	RemoteAddress string
 }
 
 func getPhoneFromResourceData(ctx context.Context, pp *phoneProxy, d *schema.ResourceData) (*platformclientv2.Phone, error) {
@@ -200,70 +208,138 @@ func flattenPhoneCapabilities(capabilities *platformclientv2.Phonecapabilities) 
 }
 
 func buildSdkLines(ctx context.Context, pp *phoneProxy, d *schema.ResourceData, lineBaseSettings *platformclientv2.Domainentityref) (linesPtr *[]platformclientv2.Line, isStandAlone bool, err error) {
-	lines := []platformclientv2.Line{}
-	lineAddress, remoteAddress := getLineProperties(d)
-	if len(*lineAddress) > 0 && len(*remoteAddress) > 0 {
-		return linesPtr, false, fmt.Errorf("remote stations cannot be standalone phones, line_address and remote_address cannot exist at the same time")
+	lineProps := getLineProperties(d)
+	phoneName := d.Get("name").(string)
+
+	lines := make([]platformclientv2.Line, 0, max(1, len(lineProps)))
+
+	// Backward-compatible fallback: no line_properties block means create one line.
+	if len(lineProps) == 0 {
+		rawName := fmt.Sprintf("%s_%d", phoneName, 1)
+		var sanitize = regexp.MustCompile(`[^\w\-]`)
+		lineName := sanitize.ReplaceAllString(rawName, "")
+
+		line := platformclientv2.Line{
+			Name:             &lineName,
+			LineBaseSettings: lineBaseSettings,
+		}
+
+		// Keep the existing fallback behavior for phones that already exist.
+		if d.Id() != "" {
+			lineId, err := getLineIdByPhoneId(ctx, pp, d.Id())
+			if err != nil {
+				log.Printf("Failed to retrieve ID for phone %s: %v", d.Id(), err)
+			} else {
+				line.Id = &lineId
+			}
+		}
+
+		lines = append(lines, line)
+		return &lines, false, nil
 	}
-	if len(*lineAddress) > 0 {
-		linesPtr = createStandalonePhoneLines(*lineAddress, &lines, lineBaseSettings)
-		isStandAlone = true
-		return linesPtr, isStandAlone, nil
-	}
-	if len(*remoteAddress) > 0 {
-		linesPtr = createNonStandalonePhoneLine(*remoteAddress, &lines, lineBaseSettings)
-		isStandAlone = false
-		return linesPtr, isStandAlone, nil
-	}
-	// If line_addresses is not provided, phone is not standalone
-	lineName := "line_" + *lineBaseSettings.Id + util.GetUniqueString()
-	line := platformclientv2.Line{
-		Name:             &lineName,
-		LineBaseSettings: lineBaseSettings,
-	}
-	// If this function is invoked on a phone create, the ID won't exist yet
-	if d.Id() != "" {
-		lineId, err := getLineIdByPhoneId(ctx, pp, d.Id())
-		if err != nil {
-			log.Printf("Failed to retrieve ID for phone %s: %v", d.Id(), err)
-		} else {
-			line.Id = &lineId
+
+	// Enforce one address mode across the phone, because phone_standalone is global.
+	mode := ""
+	for _, lp := range lineProps {
+		thisMode := ""
+		switch {
+		case lp.LineAddress != "" && lp.RemoteAddress != "":
+			return nil, false, fmt.Errorf("line_properties for line_id %s cannot set both line_address and remote_address", lp.LineID)
+		case lp.LineAddress != "":
+			thisMode = "standalone"
+		case lp.RemoteAddress != "":
+			thisMode = "remote"
+		default:
+			return nil, false, fmt.Errorf("line_properties for line_id %s must set either line_address or remote_address", lp.LineID)
+		}
+
+		if mode == "" {
+			mode = thisMode
+		} else if mode != thisMode {
+			return nil, false, fmt.Errorf("all line_properties entries must use the same address type; do not mix line_address and remote_address in the same phone")
 		}
 	}
-	lines = append(lines, line)
-	linesPtr = &lines
-	isStandAlone = false
-	return linesPtr, isStandAlone, nil
+
+	var sanitize = regexp.MustCompile(`[^\w\-]`)
+	for i, lp := range lineProps {
+		rawName := fmt.Sprintf("%s_%d", phoneName, i+1)
+		lineName := sanitize.ReplaceAllString(rawName, "")
+
+		line := platformclientv2.Line{
+			Name:             &lineName,
+			LineBaseSettings: lineBaseSettings,
+		}
+
+		// line_id is computed, so only set it when it is already present in state.
+		if lp.LineID != "" {
+			line.Id = &lp.LineID
+		}
+
+		props := map[string]interface{}{}
+		if lp.LineAddress != "" {
+			props["station_identity_address"] = map[string]interface{}{
+				"value": map[string]interface{}{
+					"instance": lp.LineAddress,
+				},
+			}
+			isStandAlone = true
+		} else {
+			props["station_remote_address"] = map[string]interface{}{
+				"value": map[string]interface{}{
+					"instance": lp.RemoteAddress,
+				},
+			}
+			isStandAlone = false
+		}
+
+		line.Properties = &props
+		lines = append(lines, line)
+
+		log.Printf(
+			"[DEBUG] Phone line: id=%v name=%s lineAddress=%s remoteAddress=%s",
+			lp.LineID,
+			lineName,
+			lp.LineAddress,
+			lp.RemoteAddress,
+		)
+	}
+
+	return &lines, isStandAlone, nil
 }
 
-func getLineProperties(d *schema.ResourceData) (*[]interface{}, *[]interface{}) {
-
-	lineAddress := make([]interface{}, 0)
-	remoteAddress := make([]interface{}, 0)
+func getLineProperties(d *schema.ResourceData) []linePropertyConfig {
 	if d == nil {
-		return &lineAddress, &remoteAddress
+		return nil
 	}
 
-	linePropertiesMap := make(map[string]interface{})
+	raw, ok := d.Get("line_properties").([]interface{})
+	if !ok || len(raw) == 0 {
+		return nil
+	}
 
-	// Safely get and check line properties
-	if lineProps, ok := d.Get("line_properties").([]interface{}); ok && len(lineProps) > 0 {
-		if propsMap, ok := lineProps[0].(map[string]interface{}); ok {
-			linePropertiesMap = propsMap
-
-			// Safely handle line_address
-			if lineAddr, ok := linePropertiesMap["line_address"].([]interface{}); ok {
-				lineAddress = lineAddr
-			}
-
-			// Safely handle remote_address
-			if remoteAddr, ok := linePropertiesMap["remote_address"].([]interface{}); ok {
-				remoteAddress = remoteAddr
-			}
+	out := make([]linePropertyConfig, 0, len(raw))
+	for _, item := range raw {
+		m, ok := item.(map[string]interface{})
+		if !ok || m == nil {
+			continue
 		}
+
+		lp := linePropertyConfig{}
+
+		if v, ok := m["line_id"].(string); ok {
+			lp.LineID = v
+		}
+		if v, ok := m["line_address"].(string); ok {
+			lp.LineAddress = v
+		}
+		if v, ok := m["remote_address"].(string); ok {
+			lp.RemoteAddress = v
+		}
+
+		out = append(out, lp)
 	}
 
-	return &lineAddress, &remoteAddress
+	return out
 }
 
 func generatePhoneProperties(hardware_id string) string {
@@ -277,10 +353,12 @@ func generatePhoneProperties(hardware_id string) string {
 					)))),
 	)
 }
-func createNonStandalonePhoneLine(remoteAddress []interface{}, linesPtr *[]platformclientv2.Line, lineBaseSettings *platformclientv2.Domainentityref) *[]platformclientv2.Line {
+func createNonStandalonePhoneLine(remoteAddress []interface{}, linesPtr *[]platformclientv2.Line, lineBaseSettings *platformclientv2.Domainentityref, phoneName string) *[]platformclientv2.Line {
 	lines := *linesPtr
-	for _, eachAddress := range remoteAddress {
-		lineName := "line_" + *lineBaseSettings.Id + "_" + util.GetUniqueString()
+	var sanitize = regexp.MustCompile(`[^\w\-]`)
+	for i, eachAddress := range remoteAddress {
+		rawName := fmt.Sprintf("%s_%d", phoneName, i+1)
+		lineName := sanitize.ReplaceAllString(rawName, "")
 		properties := map[string]interface{}{
 			"station_remote_address": &map[string]interface{}{
 				"value": &map[string]interface{}{
@@ -296,10 +374,12 @@ func createNonStandalonePhoneLine(remoteAddress []interface{}, linesPtr *[]platf
 	}
 	return &lines
 }
-func createStandalonePhoneLines(lineAddress []interface{}, linesPtr *[]platformclientv2.Line, lineBaseSettings *platformclientv2.Domainentityref) *[]platformclientv2.Line {
+func createStandalonePhoneLines(lineAddress []interface{}, linesPtr *[]platformclientv2.Line, lineBaseSettings *platformclientv2.Domainentityref, phoneName string) *[]platformclientv2.Line {
 	lines := *linesPtr
-	for _, eachLineAddress := range lineAddress {
-		lineName := "line_" + *lineBaseSettings.Id + "_" + util.GetUniqueString()
+	var sanitize = regexp.MustCompile(`[^\w\-]`)
+	for i, eachLineAddress := range lineAddress {
+		rawName := fmt.Sprintf("%s_%d", phoneName, i+1)
+		lineName := sanitize.ReplaceAllString(rawName, "")
 		properties := map[string]interface{}{
 			"station_identity_address": &map[string]interface{}{
 				"value": &map[string]interface{}{
@@ -317,64 +397,133 @@ func createStandalonePhoneLines(lineAddress []interface{}, linesPtr *[]platformc
 }
 
 func flattenLines(phoneLines *[]platformclientv2.Line) []interface{} {
-	if len(*phoneLines) == 0 {
+	if phoneLines == nil || len(*phoneLines) == 0 {
 		return nil
 	}
-	lineAddressList := []string{}
-	remoteAddressList := []string{}
-	linePropertiesMap := make(map[string]interface{})
 
-	for _, phoneLine := range *phoneLines {
-		if phoneLine.Properties == nil {
-			continue
-		}
-		if idAddressKey := (*phoneLine.Properties)["station_identity_address"]; idAddressKey != nil {
-			didI := idAddressKey.(map[string]interface{})["value"].(map[string]interface{})["instance"]
-			if didI != nil && len(didI.(string)) > 0 {
-				did := didI.(string)
-				lineAddressList = append(lineAddressList, did)
+	// Preserve the phone line order by the numeric suffix in the generated name.
+	lines := make([]platformclientv2.Line, len(*phoneLines))
+	copy(lines, *phoneLines)
 
-			}
-		}
-		if remoteAddressKey := (*phoneLine.Properties)["station_remote_address"]; remoteAddressKey != nil {
-			remoteAddress := remoteAddressKey.(map[string]interface{})["value"].(map[string]interface{})["instance"]
-			if remoteAddress != nil && len(remoteAddress.(string)) > 0 {
-				remoteAddressStr := remoteAddress.(string)
-				remoteAddressList = append(remoteAddressList, remoteAddressStr)
+	sort.SliceStable(lines, func(i, j int) bool {
+		left := int(^uint(0) >> 1)
+		right := int(^uint(0) >> 1)
+
+		if lines[i].Name != nil {
+			name := *lines[i].Name
+			if idx := strings.LastIndex(name, "_"); idx >= 0 && idx < len(name)-1 {
+				if n, err := strconv.Atoi(name[idx+1:]); err == nil {
+					left = n
+				}
 			}
 		}
 
+		if lines[j].Name != nil {
+			name := *lines[j].Name
+			if idx := strings.LastIndex(name, "_"); idx >= 0 && idx < len(name)-1 {
+				if n, err := strconv.Atoi(name[idx+1:]); err == nil {
+					right = n
+				}
+			}
+		}
+
+		if left == right {
+			// Stable fallback for older data or unexpected names.
+			leftID := ""
+			rightID := ""
+			if lines[i].Id != nil {
+				leftID = *lines[i].Id
+			}
+			if lines[j].Id != nil {
+				rightID = *lines[j].Id
+			}
+			return leftID < rightID
+		}
+
+		return left < right
+	})
+
+	result := make([]interface{}, 0, len(lines))
+	for _, phoneLine := range lines {
+		lineMap := make(map[string]interface{})
+
+		if phoneLine.Id != nil && *phoneLine.Id != "" {
+			lineMap["line_id"] = *phoneLine.Id
+		}
+
+		if phoneLine.Properties != nil {
+			if v := extractLinePropertyInstance(phoneLine.Properties, "station_identity_address"); v != "" {
+				lineMap["line_address"] = v
+			}
+			if v := extractLinePropertyInstance(phoneLine.Properties, "station_remote_address"); v != "" {
+				lineMap["remote_address"] = v
+			}
+		}
+
+		if len(lineMap) > 0 {
+			result = append(result, lineMap)
+		}
 	}
 
-	if len(lineAddressList) > 0 {
-		utilE164 := util.NewUtilE164Service()
-		formattedLineAddresses := lists.Map(lineAddressList, utilE164.FormatAsCalculatedE164Number)
-		resourcedata.SetMapValueIfNotNil(linePropertiesMap, "line_address", &formattedLineAddresses)
+	if len(result) == 0 {
+		return nil
 	}
-	if len(remoteAddressList) > 0 {
-		resourcedata.SetMapValueIfNotNil(linePropertiesMap, "remote_address", &remoteAddressList)
-	}
-	if len(linePropertiesMap) > 0 {
-		return []interface{}{linePropertiesMap}
 
-	}
-	return nil
+	return result
 }
 
-func generateLinePropertiesRemoteAddress(remoteAddress string) string {
-	return fmt.Sprintf(`
-		line_properties {
-			remote_address = [%s]
-		}
-	`, remoteAddress)
+func extractLinePropertyInstance(props *map[string]interface{}, key string) string {
+	if props == nil {
+		return ""
+	}
+
+	raw, ok := (*props)[key]
+	if !ok || raw == nil {
+		return ""
+	}
+
+	propMap, ok := raw.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	valueRaw, ok := propMap["value"]
+	if !ok || valueRaw == nil {
+		return ""
+	}
+
+	valueMap, ok := valueRaw.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	instanceRaw, ok := valueMap["instance"]
+	if !ok || instanceRaw == nil {
+		return ""
+	}
+
+	instance, ok := instanceRaw.(string)
+	if !ok {
+		return ""
+	}
+
+	return instance
 }
 
-func generateLinePropertiesLineAddress(lineAddress string) string {
+func generateLinePropertiesRemoteAddress(lineID string, remoteAddress string) string {
 	return fmt.Sprintf(`
-		line_properties {
-			line_address = [%s]
-		}
-	`, lineAddress)
+  line_properties {
+    line_id        = "%s"
+    remote_address = "%s"
+  }`, lineID, remoteAddress)
+}
+
+func generateLinePropertiesLineAddress(lineID string, lineAddress string) string {
+	return fmt.Sprintf(`
+  line_properties {
+    line_id      = "%s"
+    line_address = "%s"
+  }`, lineID, lineAddress)
 }
 
 func getLineIdByPhoneId(ctx context.Context, pp *phoneProxy, phoneId string) (string, error) {
