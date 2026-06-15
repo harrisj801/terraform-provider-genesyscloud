@@ -59,7 +59,7 @@ func getPhoneFromResourceData(ctx context.Context, pp *phoneProxy, d *schema.Res
 		return phoneConfig, fmt.Errorf("failed to get line base settings for %s: %s", *phoneConfig.Name, err)
 	}
 	lineBaseSettings := &platformclientv2.Domainentityref{Id: &lineBaseSettingsID}
-	lines, isStandalone, lineError := buildSdkLines(ctx, pp, d, lineBaseSettings, *phoneConfig.Name)
+	lines, isStandalone, lineError := buildSdkLines(ctx, pp, d, lineBaseSettings)
 	if lineError != nil {
 		return phoneConfig, fmt.Errorf("failed to create lines for %s: %s", *phoneConfig.Name, lineError)
 	}
@@ -213,15 +213,18 @@ func buildSdkLines(ctx context.Context, pp *phoneProxy, d *schema.ResourceData, 
 
 	lines := make([]platformclientv2.Line, 0, max(1, len(lineProps)))
 
-	// Backward-compatible fallback: no line_properties block means one default line.
+	// Backward-compatible fallback: no line_properties block means create one line.
 	if len(lineProps) == 0 {
-		lineName := "line_" + *lineBaseSettings.Id + util.GetUniqueString()
+		rawName := fmt.Sprintf("%s_%d", phoneName, 1)
+		var sanitize = regexp.MustCompile(`[^\w\-]`)
+		lineName := sanitize.ReplaceAllString(rawName, "")
+
 		line := platformclientv2.Line{
 			Name:             &lineName,
 			LineBaseSettings: lineBaseSettings,
 		}
 
-		// If this function is invoked on a phone create, the ID won't exist yet.
+		// Keep the existing fallback behavior for phones that already exist.
 		if d.Id() != "" {
 			lineId, err := getLineIdByPhoneId(ctx, pp, d.Id())
 			if err != nil {
@@ -235,12 +238,9 @@ func buildSdkLines(ctx context.Context, pp *phoneProxy, d *schema.ResourceData, 
 		return &lines, false, nil
 	}
 
+	// Enforce one address mode across the phone, because phone_standalone is global.
 	mode := ""
 	for _, lp := range lineProps {
-		if lp.LineID == "" {
-			return nil, false, fmt.Errorf("line_properties.line_id is required")
-		}
-
 		thisMode := ""
 		switch {
 		case lp.LineAddress != "" && lp.RemoteAddress != "":
@@ -260,12 +260,17 @@ func buildSdkLines(ctx context.Context, pp *phoneProxy, d *schema.ResourceData, 
 		}
 	}
 
+	var sanitize = regexp.MustCompile(`[^\w\-]`)
 	for i, lp := range lineProps {
-		lineName := fmt.Sprintf("%s_%d", phoneName, i+1)
+		rawName := fmt.Sprintf("%s_%d", phoneName, i+1)
+		lineName := sanitize.ReplaceAllString(rawName, "")
+
 		line := platformclientv2.Line{
 			Name:             &lineName,
 			LineBaseSettings: lineBaseSettings,
 		}
+
+		// line_id is computed, so only set it when it is already present in state.
 		if lp.LineID != "" {
 			line.Id = &lp.LineID
 		}
@@ -289,6 +294,14 @@ func buildSdkLines(ctx context.Context, pp *phoneProxy, d *schema.ResourceData, 
 
 		line.Properties = &props
 		lines = append(lines, line)
+
+		log.Printf(
+			"[DEBUG] Phone line: id=%v name=%s lineAddress=%s remoteAddress=%s",
+			lp.LineID,
+			lineName,
+			lp.LineAddress,
+			lp.RemoteAddress,
+		)
 	}
 
 	return &lines, isStandAlone, nil
@@ -388,19 +401,45 @@ func flattenLines(phoneLines *[]platformclientv2.Line) []interface{} {
 		return nil
 	}
 
-	// Copy before sorting so we do not mutate the original slice.
+	// Preserve the phone line order by the numeric suffix in the generated name.
 	lines := make([]platformclientv2.Line, len(*phoneLines))
 	copy(lines, *phoneLines)
 
 	sort.SliceStable(lines, func(i, j int) bool {
-		left := ""
-		right := ""
-		if lines[i].Id != nil {
-			left = *lines[i].Id
+		left := int(^uint(0) >> 1)
+		right := int(^uint(0) >> 1)
+
+		if lines[i].Name != nil {
+			name := *lines[i].Name
+			if idx := strings.LastIndex(name, "_"); idx >= 0 && idx < len(name)-1 {
+				if n, err := strconv.Atoi(name[idx+1:]); err == nil {
+					left = n
+				}
+			}
 		}
-		if lines[j].Id != nil {
-			right = *lines[j].Id
+
+		if lines[j].Name != nil {
+			name := *lines[j].Name
+			if idx := strings.LastIndex(name, "_"); idx >= 0 && idx < len(name)-1 {
+				if n, err := strconv.Atoi(name[idx+1:]); err == nil {
+					right = n
+				}
+			}
 		}
+
+		if left == right {
+			// Stable fallback for older data or unexpected names.
+			leftID := ""
+			rightID := ""
+			if lines[i].Id != nil {
+				leftID = *lines[i].Id
+			}
+			if lines[j].Id != nil {
+				rightID = *lines[j].Id
+			}
+			return leftID < rightID
+		}
+
 		return left < right
 	})
 
@@ -429,6 +468,7 @@ func flattenLines(phoneLines *[]platformclientv2.Line) []interface{} {
 	if len(result) == 0 {
 		return nil
 	}
+
 	return result
 }
 
