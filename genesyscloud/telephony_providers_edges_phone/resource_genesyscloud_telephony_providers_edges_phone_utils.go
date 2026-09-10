@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +35,7 @@ type PhoneConfig struct {
 // add this near the top of the file
 type linePropertyConfig struct {
 	LineID        string
+	LineName      string
 	LineAddress   string
 	RemoteAddress string
 }
@@ -264,6 +264,9 @@ func buildSdkLines(ctx context.Context, pp *phoneProxy, d *schema.ResourceData, 
 	for i, lp := range lineProps {
 		rawName := fmt.Sprintf("%s_%d", phoneName, i+1)
 		lineName := sanitize.ReplaceAllString(rawName, "")
+		if lp.LineName != "" {
+			lineName = sanitize.ReplaceAllString(lp.LineName, "")
+		}
 
 		line := platformclientv2.Line{
 			Name:             &lineName,
@@ -298,7 +301,7 @@ func buildSdkLines(ctx context.Context, pp *phoneProxy, d *schema.ResourceData, 
 		log.Printf(
 			"[DEBUG] Phone line: id=%v name=%s lineAddress=%s remoteAddress=%s",
 			lp.LineID,
-			lineName,
+			lp.LineName,
 			lp.LineAddress,
 			lp.RemoteAddress,
 		)
@@ -328,6 +331,9 @@ func getLineProperties(d *schema.ResourceData) []linePropertyConfig {
 
 		if v, ok := m["line_id"].(string); ok {
 			lp.LineID = v
+		}
+		if v, ok := m["line_name"].(string); ok {
+			lp.LineName = v
 		}
 		if v, ok := m["line_address"].(string); ok {
 			lp.LineAddress = v
@@ -401,54 +407,16 @@ func flattenLines(phoneLines *[]platformclientv2.Line) []interface{} {
 		return nil
 	}
 
-	// Preserve the phone line order by the numeric suffix in the generated name.
-	lines := make([]platformclientv2.Line, len(*phoneLines))
-	copy(lines, *phoneLines)
+	result := make([]interface{}, 0, len(*phoneLines))
 
-	sort.SliceStable(lines, func(i, j int) bool {
-		left := int(^uint(0) >> 1)
-		right := int(^uint(0) >> 1)
-
-		if lines[i].Name != nil {
-			name := *lines[i].Name
-			if idx := strings.LastIndex(name, "_"); idx >= 0 && idx < len(name)-1 {
-				if n, err := strconv.Atoi(name[idx+1:]); err == nil {
-					left = n
-				}
-			}
-		}
-
-		if lines[j].Name != nil {
-			name := *lines[j].Name
-			if idx := strings.LastIndex(name, "_"); idx >= 0 && idx < len(name)-1 {
-				if n, err := strconv.Atoi(name[idx+1:]); err == nil {
-					right = n
-				}
-			}
-		}
-
-		if left == right {
-			// Stable fallback for older data or unexpected names.
-			leftID := ""
-			rightID := ""
-			if lines[i].Id != nil {
-				leftID = *lines[i].Id
-			}
-			if lines[j].Id != nil {
-				rightID = *lines[j].Id
-			}
-			return leftID < rightID
-		}
-
-		return left < right
-	})
-
-	result := make([]interface{}, 0, len(lines))
-	for _, phoneLine := range lines {
+	for _, phoneLine := range *phoneLines {
 		lineMap := make(map[string]interface{})
 
 		if phoneLine.Id != nil && *phoneLine.Id != "" {
 			lineMap["line_id"] = *phoneLine.Id
+		}
+		if phoneLine.Name != nil && *phoneLine.Name != "" {
+			lineMap["line_name"] = *phoneLine.Name
 		}
 
 		if phoneLine.Properties != nil {
@@ -510,20 +478,22 @@ func extractLinePropertyInstance(props *map[string]interface{}, key string) stri
 	return instance
 }
 
-func generateLinePropertiesRemoteAddress(lineID string, remoteAddress string) string {
+func generateLinePropertiesRemoteAddress(lineId string, lineName string, remoteAddress string) string {
 	return fmt.Sprintf(`
   line_properties {
     line_id        = "%s"
+    line_name      = "%s"
     remote_address = "%s"
-  }`, lineID, remoteAddress)
+  }`, lineId, lineName, remoteAddress)
 }
 
-func generateLinePropertiesLineAddress(lineID string, lineAddress string) string {
+func generateLinePropertiesLineAddress(lineId string, lineName string, lineAddress string) string {
 	return fmt.Sprintf(`
   line_properties {
-    line_id      = "%s"
+    line_id        = "%s"
+	line_name      = "%s"
     line_address = "%s"
-  }`, lineID, lineAddress)
+  }`, lineId, lineName, lineAddress)
 }
 
 func getLineIdByPhoneId(ctx context.Context, pp *phoneProxy, phoneId string) (string, error) {

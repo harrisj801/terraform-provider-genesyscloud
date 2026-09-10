@@ -23,22 +23,22 @@ func TestUnitGetLineProperties(t *testing.T) {
 			resourceData: schema.TestResourceDataRaw(t, linePropertiesTestSchema(), map[string]interface{}{
 				"line_properties": []interface{}{
 					map[string]interface{}{
-						"line_id":      "guid-1",
+						"line_name":    "name-1",
 						"line_address": "192.168.1.1",
 					},
 					map[string]interface{}{
-						"line_id":        "guid-2",
+						"line_name":      "name-1",
 						"remote_address": "10.0.0.1",
 					},
 				},
 			}),
 			want: []linePropertyConfig{
 				{
-					LineID:      "guid-1",
+					LineName:    "name-1",
 					LineAddress: "192.168.1.1",
 				},
 				{
-					LineID:        "guid-2",
+					LineName:      "name-2",
 					RemoteAddress: "10.0.0.1",
 				},
 			},
@@ -76,6 +76,11 @@ func linePropertiesTestSchema() map[string]*schema.Schema {
 				Schema: map[string]*schema.Schema{
 					"line_id": {
 						Type:     schema.TypeString,
+						Computed: true,
+					},
+					"line_name": {
+						Type:     schema.TypeString,
+						Optional: true,
 						Computed: true,
 					},
 					"line_address": {

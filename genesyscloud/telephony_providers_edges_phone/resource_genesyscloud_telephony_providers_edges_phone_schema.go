@@ -38,9 +38,15 @@ func ResourcePhone() *schema.Resource {
 	lineProperties := &schema.Resource{
 		Schema: map[string]*schema.Schema{
 			`line_id`: {
-				Description: `Line ID associated to the line`,
-				Type:        schema.TypeString,
+				Description: `Id of the line`,
 				Computed:    true,
+				Type:        schema.TypeString,
+			},
+			`line_name`: {
+				Description: `Name of the line`,
+				Optional:    true,
+				Computed:    true,
+				Type:        schema.TypeString,
 			},
 			`line_address`: {
 				Description: `DID for standalone phones. Each phone number must be in an E.164 phone number format.`,
@@ -199,6 +205,7 @@ func PhoneExporter() *resourceExporter.ResourceExporter {
 		},
 		ExcludedAttributes: []string{
 			"line_base_settings_id",
+			"line_properties.line_id",
 		},
 	}
 }
