@@ -21,7 +21,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 )
 
 func getAllOutboundDncLists(ctx context.Context, clientConfig *platformclientv2.Configuration) (resourceExporter.ResourceIDMetaMap, diag.Diagnostics) {
@@ -152,20 +152,28 @@ func updateOutboundDncList(ctx context.Context, d *schema.ResourceData, meta int
 			return resp, util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to update Outbound DNC list %s error: %s", name, updateErr), response)
 		}
 		if d.HasChange("entries") {
-			resp, err := proxy.deleteOutboundDnclistPhoneEntries(ctx, d.Id(), false)
-			if err != nil {
-				return resp, util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to delete phone entries from Outbound DNC list %s error: %v", name, err), resp)
-			}
+			// Only modify entries when the user explicitly included them in config.
+			// When entries is omitted (Computed), GetRawConfig returns a null value and
+			// we must not touch the API — otherwise we would wipe all phone numbers.
+			entriesConfigVal := d.GetRawConfig().GetAttr("entries")
+			if entriesConfigVal.IsNull() || !entriesConfigVal.IsKnown() {
+				// entries omitted from config — do not touch existing API entries
+			} else {
+				if outboundDncList.DncSourceType == nil || *outboundDncList.DncSourceType != "rds" {
+					return nil, util.BuildDiagnosticError(ResourceType, "Phone numbers can only be uploaded to internal DNC lists.", fmt.Errorf("phone numbers can only be uploaded to internal DNC Lists"))
+				}
 
-			if *sdkDncList.DncSourceType == "rds" {
+				resp, err := proxy.deleteOutboundDnclistPhoneEntries(ctx, d.Id(), false)
+				if err != nil {
+					return resp, util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to delete phone entries from Outbound DNC list %s error: %v", name, err), resp)
+				}
+
 				for _, entry := range entries {
 					resp, err := proxy.uploadPhoneEntriesToDncList(outboundDncList, entry)
 					if err != nil {
 						return resp, util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to update Outbound DNC list %s error: %v", name, err), resp)
 					}
 				}
-			} else {
-				return nil, util.BuildDiagnosticError(ResourceType, "Phone numbers can only be uploaded to internal DNC lists.", fmt.Errorf("phone numbers can only be uploaded to internal DNC Lists"))
 			}
 		}
 		return nil, nil
@@ -266,15 +274,19 @@ func deleteOutboundDncList(ctx context.Context, d *schema.ResourceData, meta int
 	sdkConfig := meta.(*provider.ProviderMeta).ClientConfig
 	proxy := getOutboundDnclistProxy(sdkConfig)
 
+	dncSourceType := d.Get("dnc_source_type").(string)
+
 	diagErr := util.RetryWhen(util.IsStatus400, func() (*platformclientv2.APIResponse, diag.Diagnostics) {
 		log.Printf("Deleting Outbound DNC list")
 
-		resp, err := proxy.deleteOutboundDnclistPhoneEntries(ctx, d.Id(), false)
-		if err != nil {
-			return resp, util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to delete phone entries from Outbound DNC list %s error: %v", d.Id(), err), resp)
+		if dncSourceType == "rds" {
+			resp, err := proxy.deleteOutboundDnclistPhoneEntries(ctx, d.Id(), false)
+			if err != nil {
+				return resp, util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to delete phone entries from Outbound DNC list %s error: %v", d.Id(), err), resp)
+			}
 		}
 
-		resp, err = proxy.deleteOutboundDnclist(ctx, d.Id())
+		resp, err := proxy.deleteOutboundDnclist(ctx, d.Id())
 		if err != nil {
 			return resp, util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to delete Outbound DNC list %s error: %s", d.Id(), err), resp)
 		}

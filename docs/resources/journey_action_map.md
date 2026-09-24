@@ -6,27 +6,49 @@ description: |-
 ---
 # genesyscloud_journey_action_map (Resource)
 
+<!-- This document is automatically generated. Do not edit manually. Make changes to the schema, examples, or apis.md files in examples/resources/ and run 'make docs' to regenerate. -->
+
 Genesys Cloud Journey Action Map
 
 ## API Usage
+
 The following Genesys Cloud APIs are used by this resource. Ensure your OAuth Client has been granted the necessary scopes and permissions to perform these operations:
 
-* [GET /api/v2/journey/actionmaps](https://developer.genesys.cloud/commdigital/digital/webmessaging/journey/journey-apis#get-api-v2-journey-actionmaps)
-* [POST /api/v2/journey/actionmaps](https://developer.genesys.cloud/commdigital/digital/webmessaging/journey/journey-apis#post-api-v2-journey-actionmaps)
-* [GET /api/v2/journey/actionmaps/{actionMapId}](https://developer.genesys.cloud/commdigital/digital/webmessaging/journey/journey-apis#get-api-v2-journey-actionmaps--actionMapId-)
-* [PATCH /api/v2/journey/actionmaps/{actionMapId}](https://developer.genesys.cloud/commdigital/digital/webmessaging/journey/journey-apis#patch-api-v2-journey-actionmaps--actionMapId-)
-* [DELETE /api/v2/journey/actionmaps/{actionMapId}](https://developer.genesys.cloud/commdigital/digital/webmessaging/journey/journey-apis#delete-api-v2-journey-actionmaps--actionMapId-)
+* [GET /api/v2/architect/schedulegroups](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-architect-schedulegroups)
+* [DELETE /api/v2/architect/schedulegroups/{scheduleGroupId}](https://developer.genesys.cloud/devapps/api-explorer#delete-api-v2-architect-schedulegroups--scheduleGroupId-)
+* [GET /api/v2/architect/schedules](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-architect-schedules)
+* [DELETE /api/v2/architect/schedules/{scheduleId}](https://developer.genesys.cloud/devapps/api-explorer#delete-api-v2-architect-schedules--scheduleId-)
+* [GET /api/v2/flows](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-flows)
+* [DELETE /api/v2/flows/{flowId}](https://developer.genesys.cloud/devapps/api-explorer#delete-api-v2-flows--flowId-)
+* [GET /api/v2/journey/actionmaps](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-journey-actionmaps)
+* [POST /api/v2/journey/actionmaps](https://developer.genesys.cloud/devapps/api-explorer#post-api-v2-journey-actionmaps)
+* [DELETE /api/v2/journey/actionmaps/{actionMapId}](https://developer.genesys.cloud/devapps/api-explorer#delete-api-v2-journey-actionmaps--actionMapId-)
+* [GET /api/v2/journey/actionmaps/{actionMapId}](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-journey-actionmaps--actionMapId-)
+* [PATCH /api/v2/journey/actionmaps/{actionMapId}](https://developer.genesys.cloud/devapps/api-explorer#patch-api-v2-journey-actionmaps--actionMapId-)
+* [GET /api/v2/journey/segments](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-journey-segments)
+* [DELETE /api/v2/journey/segments/{segmentId}](https://developer.genesys.cloud/devapps/api-explorer#delete-api-v2-journey-segments--segmentId-)
+
 ## Permissions and Scopes
 
 The following permissions are required to use this resource:
 
+* `architect:flow:delete`
+* `architect:flow:view`
 * `journey:actionmap:add`
 * `journey:actionmap:delete`
 * `journey:actionmap:edit`
 * `journey:actionmap:view`
+* `journey:segment:delete`
+* `journey:segment:view`
+* `routing:schedule:delete`
+* `routing:schedule:view`
+* `routing:scheduleGroup:delete`
+* `routing:scheduleGroup:view`
 
 The following OAuth scopes are required to use this resource:
 
+* `architect`
+* `architect:readonly`
 * `journey`
 * `journey:readonly`
 
@@ -68,8 +90,6 @@ resource "genesyscloud_journey_action_map" "example_journey_action_map" {
 - `is_active` (Boolean) Whether the action map is active. Defaults to `true`.
 - `page_url_conditions` (Block Set) URL conditions that a page must match for web actions to be displayable. (see [below for nested schema](#nestedblock--page_url_conditions))
 - `trigger_with_event_conditions` (Block Set) List of event conditions that must be satisfied to trigger the action map. (see [below for nested schema](#nestedblock--trigger_with_event_conditions))
-- `trigger_with_outcome_probability_conditions` (Block Set, Deprecated) *DEPRECATED: Use trigger_with_outcome_quantile_conditions attribute instead.* Probability conditions for outcomes that must be satisfied to trigger the action map. (see [below for nested schema](#nestedblock--trigger_with_outcome_probability_conditions))
-- `trigger_with_outcome_quantile_conditions` (Block Set) Quantile conditions for outcomes that must be satisfied to trigger the action map. (see [below for nested schema](#nestedblock--trigger_with_outcome_quantile_conditions))
 - `trigger_with_segments` (Set of String) Trigger action map if any segment in the list is assigned to a given customer.
 - `weight` (Number) Weight of the action map with higher number denoting higher weight. Low=1, Medium=2, High=3. Defaults to `2`.
 
@@ -82,13 +102,12 @@ resource "genesyscloud_journey_action_map" "example_journey_action_map" {
 
 Required:
 
-- `media_type` (String) Media type of action. Valid values: webchat, webMessagingOffer, contentOffer, architectFlow, openAction.
+- `media_type` (String) Media type of action. Valid values: webMessagingOffer, contentOffer, architectFlow, openAction.
 
 Optional:
 
 - `action_template_id` (String) Action template associated with the action map. For media type contentOffer.
 - `architect_flow_fields` (Block Set, Max: 1) Architect Flow Id and input contract. For media type architectFlow. (see [below for nested schema](#nestedblock--action--architect_flow_fields))
-- `is_pacing_enabled` (Boolean) Whether this action should be throttled. Defaults to `true`.
 - `open_action_fields` (Block Set, Max: 1) Admin-configurable fields of an open action. For media type openAction. (see [below for nested schema](#nestedblock--action--open_action_fields))
 - `web_messaging_offer_fields` (Block Set, Max: 1) Admin-configurable fields of a web messaging offer action. For media type webMessagingOffer. (see [below for nested schema](#nestedblock--action--web_messaging_offer_fields))
 
@@ -193,30 +212,4 @@ Optional:
 
 - `event_name` (String) The name of the event for which this condition can be satisfied.
 - `operator` (String) The comparison operator. Valid values: containsAll, containsAny, notContainsAll, notContainsAny, equal, notEqual, greaterThan, greaterThanOrEqual, lessThan, lessThanOrEqual, startsWith, endsWith. Defaults to `equal`.
-
-
-<a id="nestedblock--trigger_with_outcome_probability_conditions"></a>
-### Nested Schema for `trigger_with_outcome_probability_conditions`
-
-Required:
-
-- `maximum_probability` (Number) Probability value for the selected outcome at or above which the action map will trigger.
-- `outcome_id` (String) The outcome ID.
-
-Optional:
-
-- `probability` (Number) Additional probability condition, where if set, the action map will trigger if the current outcome probability is lower or equal to the value.
-
-
-<a id="nestedblock--trigger_with_outcome_quantile_conditions"></a>
-### Nested Schema for `trigger_with_outcome_quantile_conditions`
-
-Required:
-
-- `max_quantile_threshold` (Number) This Outcome Quantile Condition is met when sessionMaxQuantile of the OutcomeScore is above this value, (unless fallbackQuantile is set). Range 0.00-1.00
-- `outcome_id` (String) The outcome ID.
-
-Optional:
-
-- `fallback_quantile_threshold` (Number) If set, this Condition is met when max_quantile_threshold is met, AND the current quantile of the OutcomeScore is below this fallback_quantile_threshold. Range 0.00-1.00
 

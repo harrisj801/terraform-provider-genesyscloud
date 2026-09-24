@@ -6,14 +6,18 @@ description: |-
 ---
 # genesyscloud_idp_generic (Resource)
 
+<!-- This document is automatically generated. Do not edit manually. Make changes to the schema, examples, or apis.md files in examples/resources/ and run 'make docs' to regenerate. -->
+
 Genesys Cloud Single Sign-on Generic Identity Provider. See this page for detailed configuration instructions: https://help.mypurecloud.com/articles/add-a-generic-single-sign-on-provider/
 
 ## API Usage
+
 The following Genesys Cloud APIs are used by this resource. Ensure your OAuth Client has been granted the necessary scopes and permissions to perform these operations:
 
-* [GET /api/v2/identityproviders/generic](https://developer.mypurecloud.com/api/rest/v2/identityprovider/#get-api-v2-identityproviders-generic)
-* [PUT /api/v2/identityproviders/generic](https://developer.mypurecloud.com/api/rest/v2/identityprovider/#put-api-v2-identityproviders-generic)
-* [DELETE /api/v2/identityproviders/generic](https://developer.mypurecloud.com/api/rest/v2/identityprovider/#delete-api-v2-identityproviders-generic)
+* [DELETE /api/v2/identityproviders/generic](https://developer.genesys.cloud/devapps/api-explorer#delete-api-v2-identityproviders-generic)
+* [GET /api/v2/identityproviders/generic](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-identityproviders-generic)
+* [PUT /api/v2/identityproviders/generic](https://developer.genesys.cloud/devapps/api-explorer#put-api-v2-identityproviders-generic)
+
 ## Permissions and Scopes
 
 The following permissions are required to use this resource:
@@ -42,6 +46,7 @@ resource "genesyscloud_idp_generic" "generic" {
   endpoint_compression     = false
   name_identifier_format   = "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"
   sign_authn_requests      = false
+  force_authn              = true
 }
 ```
 
@@ -58,6 +63,7 @@ resource "genesyscloud_idp_generic" "generic" {
 
 - `disabled` (Boolean) True if Generic provider is disabled. Defaults to `false`.
 - `endpoint_compression` (Boolean) True if the Genesys Cloud authentication request should be compressed. Defaults to `false`.
+- `force_authn` (Boolean) True if, on inactivity timeout, Genesys Cloud should redirect to the identity provider with the ForceAuthn flag. Defaults to `true`.
 - `logo_image_data` (String) Base64 encoded SVG image.
 - `name_identifier_format` (String) SAML name identifier format. (urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified | urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress | urn:oasis:names:tc:SAML:1.1:nameid-format:X509SubjectName | urn:oasis:names:tc:SAML:1.1:nameid-format:WindowsDomainQualifiedName | urn:oasis:names:tc:SAML:2.0:nameid-format:kerberos | urn:oasis:names:tc:SAML:2.0:nameid-format:entity | urn:oasis:names:tc:SAML:2.0:nameid-format:persistent | urn:oasis:names:tc:SAML:2.0:nameid-format:transient) Defaults to `urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified`.
 - `relying_party_identifier` (String) String used to identify Genesys Cloud to the identity provider.

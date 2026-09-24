@@ -6,14 +6,18 @@ description: |-
 ---
 # genesyscloud_idp_adfs (Resource)
 
+<!-- This document is automatically generated. Do not edit manually. Make changes to the schema, examples, or apis.md files in examples/resources/ and run 'make docs' to regenerate. -->
+
 Genesys Cloud Single Sign-on ADFS Identity Provider. See this page for detailed configuration instructions: https://help.mypurecloud.com/articles/add-microsoft-adfs-single-sign-provider/
 
 ## API Usage
+
 The following Genesys Cloud APIs are used by this resource. Ensure your OAuth Client has been granted the necessary scopes and permissions to perform these operations:
 
-* [GET /api/v2/identityproviders/adfs](https://developer.mypurecloud.com/api/rest/v2/identityprovider/#get-api-v2-identityproviders-adfs)
-* [PUT /api/v2/identityproviders/adfs](https://developer.mypurecloud.com/api/rest/v2/identityprovider/#put-api-v2-identityproviders-adfs)
-* [DELETE /api/v2/identityproviders/adfs](https://developer.mypurecloud.com/api/rest/v2/identityprovider/#delete-api-v2-identityproviders-adfs)
+* [DELETE /api/v2/identityproviders/adfs](https://developer.genesys.cloud/devapps/api-explorer#delete-api-v2-identityproviders-adfs)
+* [GET /api/v2/identityproviders/adfs](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-identityproviders-adfs)
+* [PUT /api/v2/identityproviders/adfs](https://developer.genesys.cloud/devapps/api-explorer#put-api-v2-identityproviders-adfs)
+
 ## Permissions and Scopes
 
 The following permissions are required to use this resource:
@@ -40,6 +44,7 @@ resource "genesyscloud_idp_adfs" "adfs" {
   relying_party_identifier = "unique-id-from-adfs"
   disabled                 = true
   sign_authn_requests      = false
+  force_authn              = true
 }
 ```
 
@@ -54,6 +59,7 @@ resource "genesyscloud_idp_adfs" "adfs" {
 ### Optional
 
 - `disabled` (Boolean) True if ADFS is disabled. Defaults to `false`.
+- `force_authn` (Boolean) True if, on inactivity timeout, Genesys Cloud should redirect to the identity provider with the ForceAuthn flag. Defaults to `true`.
 - `name` (String) IDP ADFS resource name
 - `relying_party_identifier` (String) String used to identify Genesys Cloud to ADFS.
 - `sign_authn_requests` (Boolean) True if the Genesys Cloud authentication request should be signed. Defaults to `false`.

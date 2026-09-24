@@ -17,7 +17,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 )
 
 /*
@@ -41,7 +41,7 @@ func getAllIdpSalesforce(ctx context.Context, clientConfig *platformclientv2.Con
 		return nil, util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to get IDP Salesforce error: %s", getErr), resp)
 	}
 
-	resources["0"] = &resourceExporter.ResourceMeta{BlockLabel: "salesforce"}
+	resources[ResourceType] = &resourceExporter.ResourceMeta{BlockLabel: "salesforce"}
 	return resources, nil
 }
 
@@ -84,6 +84,7 @@ func readIdpSalesforce(ctx context.Context, d *schema.ResourceData, meta interfa
 		resourcedata.SetNillableValue(d, "slo_binding", salesforce.SloBinding)
 		resourcedata.SetNillableValue(d, "relying_party_identifier", salesforce.RelyingPartyIdentifier)
 		resourcedata.SetNillableValue(d, "sign_authn_requests", salesforce.SignAuthnRequests)
+		resourcedata.SetNillableValue(d, "force_authn", salesforce.ForceAuthn)
 
 		log.Printf("Read IDP Salesforce")
 		return cc.CheckState(d)
@@ -121,6 +122,8 @@ func updateIdpSalesforce(ctx context.Context, d *schema.ResourceData, meta inter
 	}
 
 	update.SignAuthnRequests = platformclientv2.Bool(d.Get("sign_authn_requests").(bool))
+
+	update.ForceAuthn = platformclientv2.Bool(d.Get("force_authn").(bool))
 
 	certificates := lists.BuildSdkStringListFromInterfaceArray(d, "certificates")
 	if certificates != nil {

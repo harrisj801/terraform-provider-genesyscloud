@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -31,7 +32,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 )
 
 // Add a special generator DEVENGAGE-1646.  Basically, the API makes it look like you need a full phone_columns field here.  However, the API ignores the type because the devs reused the phone_columns object.  However,
@@ -191,7 +192,7 @@ func TestAccResourceOutboundCampaignBasic(t *testing.T) {
 		"genesyscloud_location."+locationResourceLabel+".id",
 		"Cloud",
 		false,
-		"[\"us-east-1\"]",
+		util.AssignRegion(),
 		util.NullValue,
 		util.NullValue,
 	) + fmt.Sprintf(`
@@ -610,7 +611,7 @@ func TestAccResourceOutboundCampaignCampaignStatus(t *testing.T) {
 		"genesyscloud_location."+locationResourceLabel+".id",
 		"Cloud",
 		false,
-		"[\"us-east-1\"]",
+		util.AssignRegion(),
 		util.NullValue,
 		util.NullValue,
 	) + "\ndata \"genesyscloud_auth_division_home\" \"home\" {}\n"
@@ -1129,6 +1130,7 @@ func TestAccResourceOutboundCampaignPower(t *testing.T) {
 						strconv.Quote("true"),
 						generatePhoneColumnNoTypeBlock("Cell"),
 						generateDynamicLineBalancingSettingsBlock(util.FalseValue, "0"),
+						generateDiagnosticsSettingsBlock(util.TrueValue),
 					),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(resourcePath, "name", name),
@@ -1146,6 +1148,8 @@ func TestAccResourceOutboundCampaignPower(t *testing.T) {
 						"dynamic_line_balancing_settings.0.enabled", "false"),
 					resource.TestCheckResourceAttr(resourcePath,
 						"dynamic_line_balancing_settings.0.relative_weight", "0"),
+					resource.TestCheckResourceAttr(resourcePath,
+						"diagnostics_settings.0.report_low_max_calls_per_agent_alert", "true"),
 				),
 			},
 			{
@@ -1180,6 +1184,7 @@ func TestAccResourceOutboundCampaignPower(t *testing.T) {
 						strconv.Quote("true"),
 						generatePhoneColumnNoTypeBlock("Cell"),
 						generateDynamicLineBalancingSettingsBlock(util.TrueValue, "15"),
+						generateDiagnosticsSettingsBlock(util.FalseValue),
 					),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(resourcePath, "name", name),
@@ -1198,6 +1203,46 @@ func TestAccResourceOutboundCampaignPower(t *testing.T) {
 						"dynamic_line_balancing_settings.0.enabled", "true"),
 					resource.TestCheckResourceAttr(resourcePath,
 						"dynamic_line_balancing_settings.0.relative_weight", "15"),
+					resource.TestCheckResourceAttr(resourcePath,
+						"diagnostics_settings.0.report_low_max_calls_per_agent_alert", "false"),
+				),
+			},
+			{
+				// Update with decimal max_calls_per_agent value
+				Config: referencedResources +
+					generateOutboundCampaign(
+						resourceLabel,
+						name,
+						dialingMode,
+						strconv.Quote(callerName),
+						strconv.Quote(callerAddress),
+						"genesyscloud_outbound_contact_list."+contactListResourceLabel+".id",
+						util.NullValue,
+						util.NullValue,
+						strconv.Quote(scriptId),
+						"genesyscloud_routing_queue."+queueResourceLabel+".id",
+						"genesyscloud_telephony_providers_edges_site."+siteId+".id",
+						"1",
+						"1.5",
+						util.NullValue,
+						"genesyscloud_outbound_callanalysisresponseset."+carResourceLabel+".id",
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						[]string{},
+						[]string{},
+						[]string{},
+						[]string{},
+						strconv.Quote("true"),
+						generatePhoneColumnNoTypeBlock("Cell"),
+						generateDynamicLineBalancingSettingsBlock(util.TrueValue, "15"),
+					),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourcePath, "name", name),
+					resource.TestCheckResourceAttr(resourcePath, "max_calls_per_agent", "1.5"),
 				),
 			},
 			{
@@ -1208,6 +1253,362 @@ func TestAccResourceOutboundCampaignPower(t *testing.T) {
 			},
 		},
 		CheckDestroy: testVerifyOutboundCampaignDestroyed,
+	})
+}
+
+// TestAccResourceOutboundCampaignPredictiveDiagnosticsSettings tests diagnostics_settings with predictive dialing mode
+func TestAccResourceOutboundCampaignPredictiveDiagnosticsSettings(t *testing.T) {
+	t.Parallel()
+	var (
+		resourceLabel            = "campaign_predictive_diag"
+		name                     = "Test Pred Diag " + uuid.NewString()
+		dialingMode              = "predictive"
+		callerName               = "Test Name Predictive"
+		callerAddress            = "+353371111115"
+		contactListResourceLabel = "contact_list"
+		queueResourceLabel       = "queue"
+		locationResourceLabel    = "location"
+		siteId                   = "site"
+		carResourceLabel         = "car"
+
+		resourcePath = ResourceType + "." + resourceLabel
+	)
+
+	scriptId, err := getPublishedScriptId()
+	if err != nil || scriptId == "" {
+		t.Skip("Skipping as a published script ID is needed to run this test")
+	}
+
+	emergencyNumber := "+13178793438"
+	if err := edgeSite.DeleteLocationWithNumber(emergencyNumber, sdkConfig); err != nil {
+		t.Skipf("failed to delete location with number %s: %v", emergencyNumber, err)
+	}
+
+	referencedResources := GenerateReferencedResourcesForOutboundCampaignTests(
+		contactListResourceLabel,
+		"",
+		queueResourceLabel,
+		carResourceLabel,
+		"",
+		"",
+		"",
+		"",
+		siteId,
+		emergencyNumber,
+		"",
+		"",
+		"",
+		locationResourceLabel,
+		"",
+		"",
+	)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { util.TestAccPreCheck(t) },
+		ProviderFactories: provider.GetProviderFactories(providerResources, providerDataSources),
+		Steps: []resource.TestStep{
+			{
+				Config: referencedResources +
+					generateOutboundCampaign(
+						resourceLabel,
+						name,
+						dialingMode,
+						strconv.Quote(callerName),
+						strconv.Quote(callerAddress),
+						"genesyscloud_outbound_contact_list."+contactListResourceLabel+".id",
+						util.NullValue,
+						util.NullValue,
+						strconv.Quote(scriptId),
+						"genesyscloud_routing_queue."+queueResourceLabel+".id",
+						"genesyscloud_telephony_providers_edges_site."+siteId+".id",
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						"genesyscloud_outbound_callanalysisresponseset."+carResourceLabel+".id",
+						"1",
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						[]string{},
+						[]string{},
+						[]string{},
+						[]string{},
+						util.FalseValue,
+						generatePhoneColumnNoTypeBlock("Cell"),
+						generateDiagnosticsSettingsBlock(util.TrueValue),
+					),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourcePath, "name", name),
+					resource.TestCheckResourceAttr(resourcePath, "dialing_mode", dialingMode),
+					resource.TestCheckResourceAttr(resourcePath, "caller_name", callerName),
+					resource.TestCheckResourceAttr(resourcePath, "caller_address", callerAddress),
+					resource.TestCheckResourceAttrPair(resourcePath, "contact_list_id",
+						"genesyscloud_outbound_contact_list."+contactListResourceLabel, "id"),
+					resource.TestCheckResourceAttrPair(resourcePath, "queue_id",
+						"genesyscloud_routing_queue."+queueResourceLabel, "id"),
+					resource.TestCheckResourceAttr(resourcePath,
+						"diagnostics_settings.0.report_low_max_calls_per_agent_alert", "true"),
+				),
+			},
+			{
+				// Import/Read
+				ResourceName:      resourcePath,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+		CheckDestroy: testVerifyOutboundCampaignDestroyed,
+	})
+}
+
+func TestAccResourceOutboundCampaignPreviewAutoEnd(t *testing.T) {
+	t.Parallel()
+	var (
+		resourceLabel            = "campaign_preview_auto_end"
+		name                     = "TF PreviewAutoEnd " + uuid.NewString()
+		dialingMode              = "preview"
+		callerName               = "Test Name"
+		callerAddress            = "+353371111111"
+		contactListResourceLabel = "contact_list"
+		queueResourceLabel       = "queue"
+
+		resourcePath = ResourceType + "." + resourceLabel
+	)
+
+	scriptId, err := getPublishedScriptId()
+	if err != nil || scriptId == "" {
+		t.Skip("Skipping as a published script ID is needed to run this test")
+	}
+
+	referencedResources := GenerateReferencedResourcesForOutboundCampaignTests(
+		contactListResourceLabel,
+		"",
+		queueResourceLabel,
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
+	)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { util.TestAccPreCheck(t) },
+		ProviderFactories: provider.GetProviderFactories(providerResources, providerDataSources),
+		Steps: []resource.TestStep{
+			{
+				// Step 1: Create preview campaign WITHOUT preview_auto_end (omitted = defaults to false)
+				Config: referencedResources +
+					generateOutboundCampaign(
+						resourceLabel,
+						name,
+						dialingMode,
+						strconv.Quote(callerName),
+						strconv.Quote(callerAddress),
+						"genesyscloud_outbound_contact_list."+contactListResourceLabel+".id",
+						util.NullValue,
+						util.NullValue,
+						strconv.Quote(scriptId),
+						"genesyscloud_routing_queue."+queueResourceLabel+".id",
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						[]string{},
+						[]string{},
+						[]string{},
+						[]string{},
+						util.FalseValue,
+						generatePhoneColumnNoTypeBlock("Cell"),
+					),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourcePath, "name", name),
+					resource.TestCheckResourceAttr(resourcePath, "dialing_mode", dialingMode),
+					resource.TestCheckResourceAttr(resourcePath, "preview_auto_end", util.FalseValue),
+				),
+			},
+			{
+				// Step 2: Update to enable preview_auto_end with explicit preview_time_out_seconds
+				Config: referencedResources +
+					generateOutboundCampaign(
+						resourceLabel,
+						name,
+						dialingMode,
+						strconv.Quote(callerName),
+						strconv.Quote(callerAddress),
+						"genesyscloud_outbound_contact_list."+contactListResourceLabel+".id",
+						util.NullValue,
+						util.NullValue,
+						strconv.Quote(scriptId),
+						"genesyscloud_routing_queue."+queueResourceLabel+".id",
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						"10",
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						[]string{},
+						[]string{},
+						[]string{},
+						[]string{},
+						util.FalseValue,
+						generatePhoneColumnNoTypeBlock("Cell"),
+						"preview_auto_end = true",
+					),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourcePath, "name", name),
+					resource.TestCheckResourceAttr(resourcePath, "preview_auto_end", util.TrueValue),
+					resource.TestCheckResourceAttr(resourcePath, "preview_time_out_seconds", "10"),
+				),
+			},
+			{
+				// Step 3: Disable preview_auto_end
+				Config: referencedResources +
+					generateOutboundCampaign(
+						resourceLabel,
+						name,
+						dialingMode,
+						strconv.Quote(callerName),
+						strconv.Quote(callerAddress),
+						"genesyscloud_outbound_contact_list."+contactListResourceLabel+".id",
+						util.NullValue,
+						util.NullValue,
+						strconv.Quote(scriptId),
+						"genesyscloud_routing_queue."+queueResourceLabel+".id",
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						[]string{},
+						[]string{},
+						[]string{},
+						[]string{},
+						util.FalseValue,
+						generatePhoneColumnNoTypeBlock("Cell"),
+						"preview_auto_end = false",
+					),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourcePath, "name", name),
+					resource.TestCheckResourceAttr(resourcePath, "preview_auto_end", util.FalseValue),
+				),
+			},
+			{
+				// Import/Read
+				ResourceName:      resourcePath,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+		CheckDestroy: testVerifyOutboundCampaignDestroyed,
+	})
+}
+
+// TestAccResourceOutboundCampaignDiagnosticsSettingsInvalidDialingMode tests that diagnostics_settings fails validation for unsupported dialing modes
+func TestAccResourceOutboundCampaignDiagnosticsSettingsInvalidDialingMode(t *testing.T) {
+	t.Parallel()
+	var (
+		resourceLabel            = "campaign_invalid_diag"
+		name                     = "Test Invalid Diag Campaign " + uuid.NewString()
+		callerName               = "Test Name"
+		callerAddress            = "+353371111114"
+		contactListResourceLabel = "contact_list"
+		locationResourceLabel    = "location"
+		siteId                   = "site"
+		carResourceLabel         = "car"
+	)
+
+	emergencyNumber := "+13178793437"
+	if err := edgeSite.DeleteLocationWithNumber(emergencyNumber, sdkConfig); err != nil {
+		t.Skipf("failed to delete location with number %s: %v", emergencyNumber, err)
+	}
+
+	referencedResources := GenerateReferencedResourcesForOutboundCampaignTests(
+		contactListResourceLabel,
+		"",
+		"",
+		carResourceLabel,
+		"",
+		"",
+		"",
+		"",
+		siteId,
+		emergencyNumber,
+		"",
+		"",
+		"",
+		locationResourceLabel,
+		"",
+		"",
+	)
+
+	// Test agentless mode with diagnostics_settings - should fail
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { util.TestAccPreCheck(t) },
+		ProviderFactories: provider.GetProviderFactories(providerResources, providerDataSources),
+		Steps: []resource.TestStep{
+			{
+				Config: referencedResources +
+					generateOutboundCampaign(
+						resourceLabel,
+						name,
+						"agentless", // unsupported dialing mode for diagnostics_settings
+						strconv.Quote(callerName),
+						strconv.Quote(callerAddress),
+						"genesyscloud_outbound_contact_list."+contactListResourceLabel+".id",
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						"genesyscloud_telephony_providers_edges_site."+siteId+".id",
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						"genesyscloud_outbound_callanalysisresponseset."+carResourceLabel+".id",
+						"2",
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						util.NullValue,
+						[]string{},
+						[]string{},
+						[]string{},
+						[]string{},
+						util.FalseValue,
+						generatePhoneColumnNoTypeBlock("Cell"),
+						generateDiagnosticsSettingsBlock(util.TrueValue), // This should fail validation
+					),
+				ExpectError: regexp.MustCompile("diagnostics_settings is only applicable to Power and Predictive dialing modes"),
+			},
+		},
 	})
 }
 
@@ -1265,6 +1666,188 @@ func addContactsToContactList(state *terraform.State) error {
 		return fmt.Errorf("could not post contacts to contact list")
 	}
 	return nil
+}
+
+// TestAccResourceOutboundCampaignPreciseDialing verifies that the precise_dialing_enabled
+// attribute can be created as true, updated to false, and is correctly persisted/imported.
+// The campaigns use progressive dialing.
+func TestAccResourceOutboundCampaignPreciseDialing(t *testing.T) {
+	var (
+		resourceLabel            = "campaign_precise_dialing"
+		name                     = "Test Campaign " + uuid.NewString()
+		contactListResourceLabel = "contact_list"
+		carResourceLabel         = "car"
+		queueLabel               = "queue"
+		queueNameAttr            = "tf test queue " + uuid.NewString()
+		scriptLabel              = "script"
+		scriptNameAttr           = "tf test script " + uuid.NewString()
+		scriptFilePath           = testrunner.GetTestDataPath("resource", scripts.ResourceType, "test_script.json")
+		wrapupCodeResourceLabel  = "wrapupcode"
+		outboundFlowFilePath     = filepath.Join(testrunner.RootDir, "examples/resources/genesyscloud_flow/outboundcall_flow_example.yaml")
+		flowName                 = "test flow " + uuid.NewString()
+		flowResourceLabel        = "flow"
+		divResourceLabel         = "test-division"
+		divName                  = "terraform-" + uuid.NewString()
+		locationResourceLabel    = "location"
+		siteResourceLabel        = "site"
+
+		resourcePath = ResourceType + "." + resourceLabel
+		description  = "Terraform test description"
+	)
+
+	emergencyNumber := "+13178793429"
+	if err := edgeSite.DeleteLocationWithNumber(emergencyNumber, sdkConfig); err != nil {
+		t.Skipf("failed to delete location with number %s: %v", emergencyNumber, err)
+	}
+
+	referencedResources := obContactList.GenerateOutboundContactList(
+		contactListResourceLabel,
+		"contact list "+uuid.NewString(),
+		util.NullValue,
+		strconv.Quote("Cell"),
+		[]string{strconv.Quote("Cell")},
+		[]string{strconv.Quote("Cell"), strconv.Quote("Home"), strconv.Quote("zipcode")},
+		util.FalseValue,
+		util.NullValue,
+		util.NullValue,
+		obContactList.GeneratePhoneColumnsBlock(
+			"Cell",
+			"cell",
+			strconv.Quote("Cell"),
+		),
+		obContactList.GeneratePhoneColumnsBlock(
+			"Home",
+			"home",
+			strconv.Quote("Home"),
+		),
+	) + authDivision.GenerateAuthDivisionBasic(divResourceLabel, divName) + routingWrapupcode.GenerateRoutingWrapupcodeResource(
+		wrapupCodeResourceLabel,
+		"tf wrapup code"+uuid.NewString(),
+		"genesyscloud_auth_division."+divResourceLabel+".id",
+		description,
+	) + architect_flow.GenerateFlowResource(
+		flowResourceLabel,
+		outboundFlowFilePath,
+		"",
+		false,
+		util.GenerateSubstitutionsMap(map[string]string{
+			"flow_name":          flowName,
+			"home_division_name": "${data.genesyscloud_auth_division_home.home.name}",
+			"contact_list_name":  "${genesyscloud_outbound_contact_list." + contactListResourceLabel + ".name}",
+			"wrapup_code_name":   "${genesyscloud_routing_wrapupcode." + wrapupCodeResourceLabel + ".name}",
+		}),
+	) + obResponseSet.GenerateOutboundCallAnalysisResponseSetResource(
+		carResourceLabel,
+		"tf car "+uuid.NewString(),
+		util.FalseValue,
+		util.FalseValue,
+		strconv.Quote("Disabled"),
+		obResponseSet.GenerateCarsResponsesBlock(
+			obResponseSet.GenerateCarsResponse(
+				"callable_person",
+				"transfer_flow",
+				flowName,
+				"${genesyscloud_flow.flow.id}",
+			),
+		),
+	) + routingQueue.GenerateRoutingQueueResourceBasic(queueLabel, queueNameAttr) +
+		scripts.GenerateScriptResourceBasic(scriptLabel, scriptNameAttr, scriptFilePath) +
+		"\ndata \"genesyscloud_auth_division_home\" \"home\" {}\n" +
+		location.GenerateLocationResource(
+			locationResourceLabel,
+			"tf location "+uuid.NewString(),
+			"HQ1",
+			[]string{},
+			location.GenerateLocationEmergencyNum(
+				emergencyNumber,
+				util.NullValue,
+			),
+			location.GenerateLocationAddress(
+				"7601 Interactive Way",
+				"Indianapolis",
+				"IN",
+				"US",
+				"46278",
+			),
+		) + edgeSite.GenerateSiteResourceWithCustomAttrs(
+		siteResourceLabel,
+		"tf site "+uuid.NewString(),
+		"test description",
+		"genesyscloud_location."+locationResourceLabel+".id",
+		"Cloud",
+		false,
+		util.AssignRegion(),
+		util.NullValue,
+		util.NullValue,
+	)
+
+	// campaignConfig builds a minimal progressive campaign toggling precise_dialing_enabled.
+	campaignConfig := func(preciseDialingEnabled string) string {
+		return fmt.Sprintf(`
+			resource "%s" "%s" {
+				name                          = "%s"
+				dialing_mode                  = "progressive"
+				campaign_status               = "off"
+				abandon_rate                  = 3
+				caller_name                   = "Test Caller"
+				caller_address                = "+12174181234"
+				site_id                       = genesyscloud_telephony_providers_edges_site.%s.id
+				contact_list_id               = genesyscloud_outbound_contact_list.%s.id
+				queue_id                      = genesyscloud_routing_queue.%s.id
+				script_id                     = genesyscloud_script.%s.id
+				call_analysis_response_set_id = genesyscloud_outbound_callanalysisresponseset.%s.id
+				precise_dialing_enabled       = %s
+				phone_columns {
+					column_name = "Cell"
+				}
+			}
+			`, ResourceType, resourceLabel, name, siteResourceLabel, contactListResourceLabel, queueLabel, scriptLabel, carResourceLabel, preciseDialingEnabled)
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { util.TestAccPreCheck(t) },
+		ProviderFactories: provider.GetProviderFactories(providerResources, providerDataSources),
+		Steps: []resource.TestStep{
+			{
+				// Create with precise_dialing_enabled = true
+				Config: referencedResources + campaignConfig(util.TrueValue),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourcePath, "name", name),
+					resource.TestCheckResourceAttr(resourcePath, "dialing_mode", "progressive"),
+					resource.TestCheckResourceAttr(resourcePath, "precise_dialing_enabled", util.TrueValue),
+					resource.TestCheckResourceAttrPair(resourcePath, "contact_list_id",
+						"genesyscloud_outbound_contact_list."+contactListResourceLabel, "id"),
+					resource.TestCheckResourceAttrPair(resourcePath, "queue_id",
+						"genesyscloud_routing_queue."+queueLabel, "id"),
+					resource.TestCheckResourceAttrPair(resourcePath, "script_id",
+						scripts.ResourceType+"."+scriptLabel, "id"),
+				),
+			},
+			{
+				// Update to precise_dialing_enabled = false
+				Config: referencedResources + campaignConfig(util.FalseValue),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourcePath, "name", name),
+					resource.TestCheckResourceAttr(resourcePath, "dialing_mode", "progressive"),
+					resource.TestCheckResourceAttr(resourcePath, "precise_dialing_enabled", util.FalseValue),
+					resource.TestCheckResourceAttrPair(resourcePath, "contact_list_id",
+						"genesyscloud_outbound_contact_list."+contactListResourceLabel, "id"),
+					resource.TestCheckResourceAttrPair(resourcePath, "queue_id",
+						"genesyscloud_routing_queue."+queueLabel, "id"),
+					resource.TestCheckResourceAttrPair(resourcePath, "script_id",
+						scripts.ResourceType+"."+scriptLabel, "id"),
+				),
+			},
+			{
+				// Import/Read
+				ResourceName:            resourcePath,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"queue_id"},
+			},
+		},
+		CheckDestroy: testVerifyOutboundCampaignDestroyed,
+	})
 }
 
 func generateOutboundCampaign(
@@ -1347,6 +1930,14 @@ func generateDynamicLineBalancingSettingsBlock(enabled, weight string) string {
 		relative_weight = %s
 	}
 	`, enabled, weight)
+}
+
+func generateDiagnosticsSettingsBlock(reportLowMaxCallsPerAgentAlert string) string {
+	return fmt.Sprintf(`
+	diagnostics_settings {
+		report_low_max_calls_per_agent_alert = %s
+	}
+	`, reportLowMaxCallsPerAgentAlert)
 }
 
 func getPublishedScriptId() (string, error) {

@@ -8,7 +8,7 @@ import (
 
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/provider"
 
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 )
 
 /*
@@ -34,6 +34,11 @@ Each proxy implementation:
 
 // internalProxy holds a proxy instance that can be used throughout the package
 var internalProxy *SiteProxy
+
+var (
+	unmanagedSiteCache = rc.NewResourceCache[platformclientv2.Site]()
+	managedSiteCache   = rc.NewResourceCache[platformclientv2.Site]()
+)
 
 // Type definitions for each func on our proxy so we can easily mock them out later
 type getAllSitesFunc func(ctx context.Context, p *SiteProxy, managed bool) (*[]platformclientv2.Site, *platformclientv2.APIResponse, error)
@@ -94,9 +99,6 @@ func newSiteProxy(clientConfig *platformclientv2.Configuration) *SiteProxy {
 	locationsApi := platformclientv2.NewLocationsApiWithConfig(clientConfig)
 	telephonyApi := platformclientv2.NewTelephonyApiWithConfig(clientConfig)
 	organizationApi := platformclientv2.NewOrganizationApiWithConfig(clientConfig)
-
-	unmanagedSiteCache := rc.NewResourceCache[platformclientv2.Site]()
-	managedSiteCache := rc.NewResourceCache[platformclientv2.Site]()
 
 	return &SiteProxy{
 		clientConfig:    clientConfig,
@@ -255,7 +257,13 @@ func getAllSitesFn(ctx context.Context, p *SiteProxy, managed bool) (*[]platform
 		return rc.GetCache(siteCache), nil, nil
 	} else if rc.GetCacheSize(siteCache) != *sites.Total && rc.GetCacheSize(siteCache) != 0 {
 		// The cache is populated but not with the right data, clear the cache so it can be re populated
-		siteCache = rc.NewResourceCache[platformclientv2.Site]()
+		if managed {
+			managedSiteCache = rc.NewResourceCache[platformclientv2.Site]()
+			siteCache = managedSiteCache
+		} else {
+			unmanagedSiteCache = rc.NewResourceCache[platformclientv2.Site]()
+			siteCache = unmanagedSiteCache
+		}
 	}
 
 	for pageNum := 2; pageNum <= *sites.PageCount; pageNum++ {
@@ -292,6 +300,7 @@ func createSiteFn(ctx context.Context, p *SiteProxy, siteReq *platformclientv2.S
 	if err != nil {
 		return nil, resp, err
 	}
+
 	return site, resp, nil
 }
 
@@ -372,6 +381,15 @@ func getSiteIdByNameFn(ctx context.Context, p *SiteProxy, siteName string) (stri
 func updateSiteFn(ctx context.Context, p *SiteProxy, siteId string, site *platformclientv2.Site) (*platformclientv2.Site, *platformclientv2.APIResponse, error) {
 	// Set resource context for SDK debug logging
 	ctx = provider.EnsureResourceContext(ctx, ResourceType)
+
+	// Nil out read-only/computed fields that the API returns in GET responses
+	// but should not be sent in PUT requests. These fields can be very large
+	// in orgs with many edges/sites (e.g. primaryEdges contains full Edge
+	// objects each embedding all sites), causing the PUT payload to exceed
+	// the API's 512KB request size limit and resulting in a 413 error.
+	site.PrimaryEdges = nil
+	site.SecondaryEdges = nil
+	site.Edges = nil
 
 	updatedSite, resp, err := p.edgesApi.PutTelephonyProvidersEdgesSite(siteId, *site)
 	if err != nil {

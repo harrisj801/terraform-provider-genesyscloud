@@ -86,7 +86,7 @@ func ResourceTfExport() *schema.Resource {
 				ConflictsWith: []string{"resource_types", "include_filter_resources", "exclude_filter_resources"},
 			},
 			"replace_with_datasource": {
-				Description: "Include only resources that match either a resource type or a resource type::regular expression.  See export guide for additional information.",
+				Description: "Replace exported resources with data sources for entries that match either a resource type (equivalent to \"type::\") or a resource type::regular expression. See export guide for additional information.",
 				Type:        schema.TypeList,
 				Optional:    true,
 				Elem: &schema.Schema{
@@ -155,7 +155,7 @@ func ResourceTfExport() *schema.Resource {
 				ForceNew:    true,
 			},
 			"enable_dependency_resolution": {
-				Description: "Adds a \"depends_on\" attribute to genesyscloud_flow resources with a list of resources that are referenced inside the flow configuration . This also resolves and exports all the dependent resources for any given resource. Resources mentioned in exclude_attributes will not be exported.",
+				Description: "Adds a \"depends_on\" attribute to genesyscloud_flow and genesyscloud_script resources with a list of resources that are referenced inside the flow or script configuration. This also resolves and exports all the dependent resources for any given resource. Resources mentioned in exclude_attributes will not be exported.",
 				Type:        schema.TypeBool,
 				Optional:    true,
 				Default:     false,
@@ -194,6 +194,20 @@ func ResourceTfExport() *schema.Resource {
 				Default:     10,
 				Type:        schema.TypeInt,
 				Optional:    true,
+				ForceNew:    true,
+			},
+			"export_deprecated": {
+				Description: "Export attributes that are marked as being Deprecated. Defaults to true to match existing functionality. This attribute's default value will likely switch to false in a future release.",
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     true,
+				ForceNew:    true,
+			},
+			"export_omit_unresolved_refs": {
+				Description: "Omit optional reference attributes that could not be resolved to Terraform references during export. When disabled, unresolved references are left as raw GUIDs. Defaults to false to match existing functionality. This attribute's default value will likely switch to true in a future release.",
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     false,
 				ForceNew:    true,
 			},
 		},

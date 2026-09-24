@@ -127,6 +127,16 @@ func TaskManagementWorktypeStatusExporter() *resourceExporter.ResourceExporter {
 		RefAttrs: map[string]*resourceExporter.RefAttrSettings{
 			"worktype_id": {RefType: "genesyscloud_task_management_worktype"},
 		},
+		// Deprecated transition attributes must not be exported on status resources.
+		// Mutual destination_status_ids / default_destination_status_id refs between statuses
+		// create Terraform dependency cycles. Those fields belong on
+		// genesyscloud_task_management_worktype_status_transition instead.
+		ExcludedAttributes: []string{
+			"destination_status_ids",
+			"default_destination_status_id",
+			"status_transition_delay_seconds",
+			"status_transition_time",
+		},
 	}
 }
 

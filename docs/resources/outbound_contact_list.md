@@ -6,20 +6,31 @@ description: |-
 ---
 # genesyscloud_outbound_contact_list (Resource)
 
+<!-- This document is automatically generated. Do not edit manually. Make changes to the schema, examples, or apis.md files in examples/resources/ and run 'make docs' to regenerate. -->
+
 Genesys Cloud Outbound Contact List
 
 ## API Usage
+
 The following Genesys Cloud APIs are used by this resource. Ensure your OAuth Client has been granted the necessary scopes and permissions to perform these operations:
 
-- [GET /api/v2/outbound/contactlists](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-outbound-contactlists)
-- [POST /api/v2/outbound/contactlists](https://developer.genesys.cloud/devapps/api-explorer#post-api-v2-outbound-contactlists)
-- [GET /api/v2/outbound/contactlists/{contactListId}](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-outbound-contactlists--contactListId-)
-- [PUT /api/v2/outbound/contactlists/{contactListId}](https://developer.genesys.cloud/devapps/api-explorer#put-api-v2-outbound-contactlists--contactListId-)
-- [DELETE /api/v2/outbound/contactlists/{contactListId}](https://developer.genesys.cloud/devapps/api-explorer#delete-api-v2-outbound-contactlists--contactListId-)
+* [GET /api/v2/outbound/contactlists](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-outbound-contactlists)
+* [POST /api/v2/outbound/contactlists](https://developer.genesys.cloud/devapps/api-explorer#post-api-v2-outbound-contactlists)
+* [DELETE /api/v2/outbound/contactlists/{contactListId}](https://developer.genesys.cloud/devapps/api-explorer#delete-api-v2-outbound-contactlists--contactListId-)
+* [GET /api/v2/outbound/contactlists/{contactListId}](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-outbound-contactlists--contactListId-)
+* [PUT /api/v2/outbound/contactlists/{contactListId}](https://developer.genesys.cloud/devapps/api-explorer#put-api-v2-outbound-contactlists--contactListId-)
+* [POST /api/v2/outbound/contactlists/{contactListId}/clear](https://developer.genesys.cloud/devapps/api-explorer#post-api-v2-outbound-contactlists--contactListId--clear)
+* [POST /api/v2/outbound/contactlists/{contactListId}/contacts/search](https://developer.genesys.cloud/devapps/api-explorer#post-api-v2-outbound-contactlists--contactListId--contacts-search)
+* [GET /api/v2/outbound/contactlists/{contactListId}/export](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-outbound-contactlists--contactListId--export)
+* [POST /api/v2/outbound/contactlists/{contactListId}/export](https://developer.genesys.cloud/devapps/api-explorer#post-api-v2-outbound-contactlists--contactListId--export)
+* [GET /api/v2/outbound/contactlists/{contactListId}/importstatus](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-outbound-contactlists--contactListId--importstatus)
+
 ## Permissions and Scopes
 
 The following permissions are required to use this resource:
 
+* `outbound:contact:delete`
+* `outbound:contact:view`
 * `outbound:contactList:add`
 * `outbound:contactList:delete`
 * `outbound:contactList:edit`
@@ -110,7 +121,8 @@ Required:
 
 Optional:
 
-- `contactable_time_column` (String) A column that indicates the timezone to use for a given contact when checking contactable times.
+- `contactable_time_column` (String, Deprecated) *DEPRECATED: Use `contactable_time_column_name` instead.* A column that indicates the timezone to use for a given contact when checking contactable times.
+- `contactable_time_column_name` (String) A column name that indicates the timezone to use for a given contact when checking contactable times.
 
 
 <a id="nestedblock--phone_columns"></a>
@@ -123,7 +135,8 @@ Required:
 
 Optional:
 
-- `callable_time_column` (String) A column that indicates the timezone to use for a given contact when checking callable times. Not allowed if 'automaticTimeZoneMapping' is set to true.
+- `callable_time_column` (String, Deprecated) *DEPRECATED: Use `callable_time_column_name` instead.* A column that indicates the timezone to use for a given contact when checking callable times. Not allowed if 'automaticTimeZoneMapping' is set to true.
+- `callable_time_column_name` (String) A column name that indicates the timezone to use for a given contact when checking callable times.
 
 
 <a id="nestedblock--whats_app_columns"></a>

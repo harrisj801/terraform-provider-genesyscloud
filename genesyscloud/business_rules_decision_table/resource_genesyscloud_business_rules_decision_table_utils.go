@@ -2,14 +2,18 @@ package business_rules_decision_table
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
+	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/util"
+	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/util/chunks"
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/util/resourcedata"
 )
 
@@ -347,23 +351,6 @@ func buildUpdateRequest(d *schema.ResourceData) *platformclientv2.Updatedecision
 	return updateRequest
 }
 
-// convertSDKRowToUpdateRequest converts an SDK row to update request format
-func convertSDKRowToUpdateRequest(sdkRow platformclientv2.Createdecisiontablerowrequest) *platformclientv2.Putdecisiontablerowrequest {
-	updateRequest := &platformclientv2.Putdecisiontablerowrequest{}
-
-	// Copy inputs if they exist
-	if sdkRow.Inputs != nil {
-		updateRequest.Inputs = sdkRow.Inputs
-	}
-
-	// Copy outputs if they exist
-	if sdkRow.Outputs != nil {
-		updateRequest.Outputs = sdkRow.Outputs
-	}
-
-	return updateRequest
-}
-
 // flattenColumns flattens the SDK columns response to provider format
 func flattenColumns(sdkColumns *platformclientv2.Decisiontablecolumns) map[string]interface{} {
 	if sdkColumns == nil {
@@ -629,12 +616,14 @@ func convertLiteralToSDK(literal map[string]interface{}) (*platformclientv2.Lite
 	return sdkLiteral, nil
 }
 
-// converts an SDK literal to provider format
+// convertSDKLiteralToProvider converts an SDK literal to provider format.
+// String and stringList values are trimmed to ensure clean exports between orgs.
 func convertSDKLiteralToProvider(sdkLiteral *platformclientv2.Literal) map[string]interface{} {
 	literal := make(map[string]interface{})
 
 	if sdkLiteral.VarString != nil {
-		literal["value"] = *sdkLiteral.VarString
+		// Trim whitespace to ensure consistency between orgs
+		literal["value"] = strings.TrimSpace(*sdkLiteral.VarString)
 		literal["type"] = "string"
 	} else if sdkLiteral.Integer != nil {
 		literal["value"] = strconv.Itoa(*sdkLiteral.Integer)
@@ -657,8 +646,12 @@ func convertSDKLiteralToProvider(sdkLiteral *platformclientv2.Literal) map[strin
 		literal["value"] = *sdkLiteral.Special
 		literal["type"] = "special"
 	} else if sdkLiteral.Strings != nil {
-		// Convert string slice back to comma-separated string
-		literal["value"] = strings.Join(*sdkLiteral.Strings, ",")
+		// Trim whitespace to ensure consistency between orgs
+		trimmed := make([]string, len(*sdkLiteral.Strings))
+		for i, s := range *sdkLiteral.Strings {
+			trimmed[i] = strings.TrimSpace(s)
+		}
+		literal["value"] = strings.Join(trimmed, ",")
 		literal["type"] = "stringList"
 	} else {
 		// If no fields are set, return empty values to indicate use of column default
@@ -968,86 +961,382 @@ func valuesEqual(val1, val2 interface{}) bool {
 	}
 }
 
-// applyRowChanges applies the detected changes to the draft version
-func applyRowChanges(ctx context.Context, proxy *BusinessRulesDecisionTableProxy, tableId string, version int, changes RowChange) error {
-	// Get the table version to extract column mapping
+// rowInputKey returns a stable string that identifies a row by its input values -
+// the combination the API treats as unique (a "duplicate row" is two rows with
+// the same inputs). The row is first converted to the form that is sent to the
+// API, then turned into JSON. JSON sorts the keys, so two rows with the same
+// inputs always produce the same string no matter what order the columns were
+// listed in.
+func rowInputKey(rowMap map[string]interface{}, inputColumnIds, outputColumnIds []string) (string, error) {
+	sdkRow, err := convertDecisionTableRowFromProviderToSDK(rowMap, inputColumnIds, outputColumnIds)
+	if err != nil {
+		return "", err
+	}
+	if sdkRow.Inputs == nil {
+		return "", nil
+	}
+	b, err := json.Marshal(*sdkRow.Inputs)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// orderUpdatesForApply returns changes.updates reordered so that applying them
+// one at a time never reaches a point where two rows have the same input values,
+// which the API rejects with "409 duplicate decision table rows".
+//
+// The problem happens because rows are updated one at a time: if row A is changed
+// to the input values that row B still has (because B has not been updated yet),
+// then for a moment two rows share those values. We avoid this with a simple
+// rule: only update a row once the input values it wants are free - that is,
+// update the row that is moving away from a set of values before the row that
+// wants to move onto them.
+//
+// In practice, we repeatedly apply any row whose wanted input values no other row
+// still has; doing so frees up more values, which lets more rows go, until every
+// update is applied. Deletes are applied before updates by the caller, so values
+// freed by a delete are already available and do not affect the ordering.
+//
+// The order is repeatable (ties are broken by row_id) so the same plan is applied
+// the same way on every run. A real, lasting duplicate in the desired
+// configuration (two updates ending on the same input values, or an update moving
+// onto values held by a row that is not changing) is a genuine configuration
+// error and is returned as one, rather than being reordered away. A true cycle (a
+// set of rows swapping input values at the same time, for example A and B trading
+// values) can never be applied one row at a time without a temporary value; it is
+// reported with the rows involved.
+func orderUpdatesForApply(changes RowChange, oldRows []interface{}, inputColumnIds, outputColumnIds []string) ([]map[string]interface{}, error) {
+	waves, err := orderUpdateWavesForApply(changes, oldRows, inputColumnIds, outputColumnIds)
+	if err != nil {
+		return nil, err
+	}
+	ordered := make([]map[string]interface{}, 0, len(changes.updates))
+	for _, wave := range waves {
+		ordered = append(ordered, wave...)
+	}
+	return ordered, nil
+}
+
+// orderUpdateWavesForApply groups updates into dependency waves. Rows in the same
+// wave do not depend on each other and can share a bulk request; each later wave
+// must wait until earlier waves have been applied so the input values it wants
+// are actually free on the table.
+//
+// The bulk update API is not atomic with respect to uniqueness: it validates each
+// row against the current table, so a chain such as Standard->Premium then
+// VIP->Standard 409s if both rows are sent in one request.
+func orderUpdateWavesForApply(changes RowChange, oldRows []interface{}, inputColumnIds, outputColumnIds []string) ([][]map[string]interface{}, error) {
+	if len(changes.updates) == 0 {
+		return nil, nil
+	}
+
+	deleted := make(map[string]bool, len(changes.deletes))
+	for _, id := range changes.deletes {
+		deleted[id] = true
+	}
+
+	// The current input values for every existing row, keyed by row_id.
+	oldKeyByID := make(map[string]string, len(oldRows))
+	for _, r := range oldRows {
+		rowMap, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		id, _ := rowMap["row_id"].(string)
+		if id == "" {
+			continue
+		}
+		k, err := rowInputKey(rowMap, inputColumnIds, outputColumnIds)
+		if err != nil {
+			// An existing row that fails conversion (for example a legacy or
+			// malformed row in state) must not fail the whole apply - it may not
+			// even be part of this change. Skip it: at worst we miss a dependency
+			// involving it, which is no worse than the earlier behavior that never
+			// looked at existing rows.
+			log.Printf("[WARN] skipping existing row %s in update ordering; could not compute input key: %s", id, err)
+			continue
+		}
+		oldKeyByID[id] = k
+	}
+
+	// The wanted input values for each updated row, and the set of updated row ids.
+	updatedIDs := make(map[string]bool, len(changes.updates))
+	targetKeyByID := make(map[string]string, len(changes.updates))
+	for _, row := range changes.updates {
+		id, _ := row["row_id"].(string)
+		if id == "" {
+			return nil, fmt.Errorf("update row is missing row_id")
+		}
+		k, err := rowInputKey(row, inputColumnIds, outputColumnIds)
+		if err != nil {
+			return nil, fmt.Errorf("failed to compute input key for updated row %s: %s", id, err)
+		}
+		updatedIDs[id] = true
+		targetKeyByID[id] = k
+	}
+
+	// Two updates cannot end on the same input values (that is a real duplicate).
+	seenTarget := make(map[string]string, len(targetKeyByID))
+	for id, k := range targetKeyByID {
+		if other, exists := seenTarget[k]; exists {
+			return nil, fmt.Errorf("rows %s and %s would both have identical inputs; this is a duplicate row in the desired configuration, not a transient conflict", other, id)
+		}
+		seenTarget[k] = id
+	}
+
+	// Input values held by rows that do not change (existing, not deleted, not
+	// updated). An update moving onto one of these is a real duplicate.
+	staticKey := make(map[string]string)
+	for id, k := range oldKeyByID {
+		if deleted[id] || updatedIDs[id] {
+			continue
+		}
+		staticKey[k] = id
+	}
+	for id, k := range targetKeyByID {
+		if other, exists := staticKey[k]; exists {
+			return nil, fmt.Errorf("row %s would take inputs already held by unchanged row %s; this is a duplicate row in the desired configuration, not a transient conflict", id, other)
+		}
+	}
+
+	// Work out, for each updated row, which other updated rows must go before it,
+	// then apply them in an order that respects those constraints.
+	//
+	// "rowHolder must go before rowTaker" means: rowHolder currently has the input
+	// values that rowTaker wants to move onto, so rowHolder has to move away first.
+	// Applying the updates in this order means a row's wanted values are always
+	// free when it is written, so no two rows ever share the same values along the
+	// way. Rows that do not change and rows that are deleted never move, so they
+	// cannot be the rowHolder that moves away; only other updated rows can create a
+	// real dependency (lasting duplicates against unchanged rows were already
+	// rejected above).
+	//
+	// Bookkeeping (rowTaker waits on rowHolder):
+	//   byID       - row_id -> the row map, so we can emit rows in the final order
+	//   dependsOn  - rowTaker -> the rowHolders it is still waiting on (empty = free to apply now)
+	//   dependents - rowHolder -> the rowTakers waiting on it (so we can free them once it is applied)
+	byID := make(map[string]map[string]interface{}, len(changes.updates))
+	dependsOn := make(map[string]map[string]bool, len(changes.updates))  // rowTaker -> rowHolders it waits on
+	dependents := make(map[string]map[string]bool, len(changes.updates)) // rowHolder -> rowTakers waiting on it
+	ids := make([]string, 0, len(changes.updates))
+	for _, row := range changes.updates {
+		id := row["row_id"].(string)
+		byID[id] = row
+		ids = append(ids, id)
+		dependsOn[id] = map[string]bool{}
+		dependents[id] = map[string]bool{}
+	}
+	for _, rowTaker := range ids {
+		targetK := targetKeyByID[rowTaker]
+		for _, rowHolder := range ids {
+			if rowHolder == rowTaker {
+				continue
+			}
+			// Record that rowHolder must go before rowTaker only when rowHolder
+			// currently has rowTaker's wanted input values (oldKeyByID[rowHolder] ==
+			// targetK) AND rowHolder is actually moving away from them
+			// (targetKeyByID[rowHolder] != targetK). If rowHolder were keeping those
+			// values it would be a real duplicate, which the checks above already
+			// rejected, not something to reorder around.
+			if oldKeyByID[rowHolder] == targetK && targetKeyByID[rowHolder] != targetK {
+				dependsOn[rowTaker][rowHolder] = true
+				dependents[rowHolder][rowTaker] = true
+			}
+		}
+	}
+
+	// Each wave is every row that is free to apply now. After a wave is sent as
+	// a bulk request, its old input values are free and the next wave can go.
+	// Independent updates stay in one wave (one bulk request, still chunked by
+	// limUpd). A chain such as Standard->Premium then VIP->Standard is two waves:
+	// putting both in one request 409s because uniqueness is checked against the
+	// current table, not the post-batch result.
+	sort.Strings(ids)
+	ready := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if len(dependsOn[id]) == 0 {
+			ready = append(ready, id)
+		}
+	}
+	sort.Strings(ready)
+
+	waves := make([][]map[string]interface{}, 0)
+	placed := 0
+	for len(ready) > 0 {
+		wave := make([]map[string]interface{}, 0, len(ready))
+		newlyReady := make([]string, 0)
+		seenReady := make(map[string]bool, len(ready))
+		for _, id := range ready {
+			wave = append(wave, byID[id])
+			placed++
+			for r := range dependents[id] {
+				delete(dependsOn[r], id)
+				if len(dependsOn[r]) == 0 && !seenReady[r] {
+					seenReady[r] = true
+					newlyReady = append(newlyReady, r)
+				}
+			}
+		}
+		sort.Strings(newlyReady)
+		waves = append(waves, wave)
+		ready = newlyReady
+	}
+
+	if placed != len(ids) {
+		remaining := make([]string, 0)
+		for _, id := range ids {
+			if len(dependsOn[id]) > 0 {
+				remaining = append(remaining, id)
+			}
+		}
+		sort.Strings(remaining)
+		return nil, fmt.Errorf("rows %s form a cyclic input-value swap that cannot be applied one row at a time without a transient duplicate; split the change across separate applies (move one row to a temporary unused input value first)", strings.Join(remaining, ", "))
+	}
+
+	return waves, nil
+}
+
+// applyRowChanges applies the detected changes to the draft version.
+// priorRowCount is the number of rows already present before adds are applied
+// (kept rows = original rows minus deletes); used by the bulk ghost-chunk guard.
+// oldRows is the pre-change row set used to order updates safely (RULES-1907).
+func applyRowChanges(ctx context.Context, proxy *BusinessRulesDecisionTableProxy, tableId string, version int, changes RowChange, priorRowCount int, oldRows []interface{}) error {
+	limAdd, limUpd, limRem := getBulkChunkLimits()
+	return applyRowChangesWithLimits(ctx, proxy, tableId, version, changes, priorRowCount, oldRows, limAdd, limUpd, limRem)
+}
+
+// applyRowChangesWithLimits applies row changes using explicit bulk chunk sizes (used in tests).
+func applyRowChangesWithLimits(ctx context.Context, proxy *BusinessRulesDecisionTableProxy, tableId string, version int, changes RowChange, priorRowCount int, oldRows []interface{}, limAdd, limUpd, limRem int) error {
 	tableVersion, _, err := proxy.getBusinessRulesDecisionTableVersion(ctx, tableId, version)
 	if err != nil {
 		return fmt.Errorf("failed to get table version for column mapping: %s", err)
 	}
 
-	// Get column IDs in order for column order mapping
 	inputColumnIds, outputColumnIds := extractColumnOrder(tableVersion.Columns)
 
-	// Track successfully added rows for potential rollback
-	var addedRows []string
-
-	// Delete rows first
-	for _, rowId := range changes.deletes {
-		log.Printf("Deleting row %s", rowId)
-		_, err := proxy.deleteDecisionTableRow(ctx, tableId, version, rowId)
-		if err != nil {
-			return fmt.Errorf("failed to delete row %s: %s", rowId, err)
-		}
-		log.Printf("Successfully deleted row %s", rowId)
-	}
-
-	// Update existing rows
-	for _, row := range changes.updates {
-		rowId := row["row_id"].(string)
-		log.Printf("Updating row %s", rowId)
-
-		// Convert to SDK format using column order mapping (same as creation)
-		sdkRow, err := convertDecisionTableRowFromProviderToSDK(row, inputColumnIds, outputColumnIds)
-		if err != nil {
-			return fmt.Errorf("failed to convert row for update: %s", err)
-		}
-
-		// Convert SDK row to update request format
-		updateRequest := convertSDKRowToUpdateRequest(sdkRow)
-
-		// Update the row
-		updatedRow, _, err := proxy.updateDecisionTableRow(ctx, tableId, version, rowId, updateRequest)
-		if err != nil {
-			return fmt.Errorf("failed to update row %s: %s", rowId, err)
-		}
-
-		// Log the returned row data for debugging
-		if updatedRow != nil {
-			rowIdStr := "unknown"
-			rowIndexStr := "unknown"
-			if updatedRow.Id != nil {
-				rowIdStr = *updatedRow.Id
+	start := 0
+	if len(changes.deletes) > 0 {
+		for _, chunk := range chunks.ChunkBy(changes.deletes, limRem) {
+			log.Printf("Bulk deleting %d rows", len(chunk))
+			_, err := proxy.bulkRemoveDecisionTableRows(ctx, tableId, version, chunk)
+			if err != nil {
+				return fmt.Errorf("failed to bulk delete rows (batch %d-%d of %d): %s", start, start+len(chunk)-1, len(changes.deletes), err)
 			}
-			if updatedRow.RowIndex != nil {
-				rowIndexStr = fmt.Sprintf("%d", *updatedRow.RowIndex)
-			}
-			log.Printf("Successfully updated row %s: returned row_id=%s, row_index=%s",
-				rowId, rowIdStr, rowIndexStr)
-		} else {
-			log.Printf("Successfully updated row %s (no row data returned)", rowId)
+			log.Printf("Successfully bulk deleted %d rows", len(chunk))
+			start += len(chunk)
 		}
 	}
 
-	// Add new rows using column order mapping
+	// Order updates into dependency waves so a row moving away from input values
+	// is applied before a row moving onto those values (RULES-1907). The bulk
+	// update API is not atomic with respect to uniqueness: it validates each row
+	// against the current table, so dependent updates must be separate requests
+	// even when they would fit in one chunk. Independent updates in the same wave
+	// are still batched up to limUpd.
+	waves, err := orderUpdateWavesForApply(changes, oldRows, inputColumnIds, outputColumnIds)
+	if err != nil {
+		return fmt.Errorf("failed to order row updates: %s", err)
+	}
+	totalUpdates := 0
+	for _, wave := range waves {
+		totalUpdates += len(wave)
+	}
+	start = 0
+	for _, wave := range waves {
+		updatePayloads := make([]platformclientv2.Row, 0, len(wave))
+		for _, row := range wave {
+			body, err := buildBulkUpdateRowFromProviderMap(row, inputColumnIds, outputColumnIds)
+			if err != nil {
+				return fmt.Errorf("failed to build bulk update row: %s", err)
+			}
+			updatePayloads = append(updatePayloads, body)
+		}
+		for _, chunk := range chunks.ChunkBy(updatePayloads, limUpd) {
+			log.Printf("Bulk updating %d rows", len(chunk))
+			_, err := proxy.bulkUpdateDecisionTableRows(ctx, tableId, version, chunk)
+			if err != nil {
+				return fmt.Errorf("failed to bulk update rows (batch %d-%d of %d): %s", start, start+len(chunk)-1, totalUpdates, err)
+			}
+			log.Printf("Successfully bulk updated %d rows", len(chunk))
+			start += len(chunk)
+		}
+	}
+
+	addRows := make([]platformclientv2.Createdecisiontablerowrequest, 0, len(changes.adds))
 	for i, row := range changes.adds {
-		log.Printf("Adding new row %d/%d", i+1, len(changes.adds))
 		sdkRow, err := convertDecisionTableRowFromProviderToSDK(row, inputColumnIds, outputColumnIds)
 		if err != nil {
 			return fmt.Errorf("failed to convert row %d: %s", i+1, err)
 		}
-		_, err = proxy.createDecisionTableRow(ctx, tableId, version, &sdkRow)
-		if err != nil {
-			// If adding a row fails, we can't easily rollback individual rows
-			// The version cleanup will handle the overall rollback
-			return fmt.Errorf("failed to add new row %d/%d: %s", i+1, len(changes.adds), err)
-		}
-
-		// Track successfully added rows (if we had row IDs, we'd store them here)
-		addedRows = append(addedRows, fmt.Sprintf("row_%d", i+1))
-		log.Printf("Successfully added row %d/%d", i+1, len(changes.adds))
+		sdkRow.RowIndex = nil
+		addRows = append(addRows, sdkRow)
+	}
+	if err := bulkAddConvertedRows(ctx, proxy, tableId, version, addRows, limAdd, priorRowCount); err != nil {
+		return err
 	}
 
-	log.Printf("Successfully applied all row changes: %d deletes, %d updates, %d adds", len(changes.deletes), len(changes.updates), len(addedRows))
+	log.Printf("Successfully applied all row changes: %d deletes, %d updates, %d adds", len(changes.deletes), len(changes.updates), len(changes.adds))
 	return nil
+}
+
+// normalizeLiteralValue normalizes whitespace in string and stringList literal values.
+func normalizeLiteralValue(value, literalType string) string {
+	if value == "" {
+		return value
+	}
+
+	switch literalType {
+	case "string":
+		return strings.TrimSpace(util.StripInvisibleUnicodeFromString(value))
+	case "stringList":
+		stripped := util.StripInvisibleUnicodeFromString(value)
+		parts := strings.Split(stripped, ",")
+		for i, part := range parts {
+			parts[i] = strings.TrimSpace(part)
+		}
+		return strings.Join(parts, ",")
+	default:
+		return value
+	}
+}
+
+// bulkAddConvertedRows bulk-adds pre-converted SDK rows in chunks. Each row must have RowIndex nilled.
+// baseRowCount is the number of rows on the version before this add operation starts (0 on create,
+// kept-row count on update); chunkStart offsets within sdkRows feed the ghost-chunk index guard.
+func bulkAddConvertedRows(ctx context.Context, proxy *BusinessRulesDecisionTableProxy, tableId string, version int, sdkRows []platformclientv2.Createdecisiontablerowrequest, chunkLimit int, baseRowCount int) error {
+	chunkStart := 0
+	for _, chunk := range chunks.ChunkBy(sdkRows, chunkLimit) {
+		log.Printf("Bulk adding %d new rows", len(chunk))
+		resp, err := proxy.bulkAddDecisionTableRows(ctx, tableId, version, chunk)
+		if err != nil {
+			if isGhostChunkDuplicate(resp, baseRowCount, chunkStart, len(chunk)) {
+				first, last := expectedChunkIndexRange(baseRowCount, chunkStart, len(chunk))
+				log.Printf("[WARN] bulk chunk rows %d-%d already exist on decision table %s version %d (409 %s with index in [%d,%d]); treating as added and continuing",
+					chunkStart+1, chunkStart+len(chunk), tableId, version, decisionTableDuplicateRowCode, first, last)
+				chunkStart += len(chunk)
+				continue
+			}
+			return fmt.Errorf("failed to bulk add rows (batch %d-%d of %d): %s", chunkStart, chunkStart+len(chunk)-1, len(sdkRows), err)
+		}
+		log.Printf("Successfully bulk added %d rows to decision table %s version %d", len(chunk), tableId, version)
+		chunkStart += len(chunk)
+	}
+	return nil
+}
+
+func buildBulkUpdateRowFromProviderMap(row map[string]interface{}, inputColumnIds, outputColumnIds []string) (platformclientv2.Row, error) {
+	sdkRow, err := convertDecisionTableRowFromProviderToSDK(row, inputColumnIds, outputColumnIds)
+	if err != nil {
+		return platformclientv2.Row{}, err
+	}
+	rowID, ok := row["row_id"].(string)
+	if !ok || rowID == "" {
+		return platformclientv2.Row{}, fmt.Errorf("row_id is required for row update")
+	}
+	return platformclientv2.Row{
+		RowId:   platformclientv2.String(rowID),
+		Inputs:  sdkRow.Inputs,
+		Outputs: sdkRow.Outputs,
+	}, nil
 }

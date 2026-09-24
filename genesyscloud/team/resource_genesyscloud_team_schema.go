@@ -1,9 +1,7 @@
 package team
 
-// @team: Workforce Management
-// @chat: #gc-wfm
-// @jira: WFM
-// @pm: Paul Wood
+// @team: Platform Users and Groups
+// @pm: Paul Turner
 // @description: Team management for organizing users into groups for workforce management, scheduling, and collaboration. Teams are used for agent grouping, performance tracking, and resource allocation across the contact center.
 
 import (
@@ -43,7 +41,14 @@ func ResourceTeam() *schema.Resource {
 		Importer: &schema.ResourceImporter{
 			StateContext: schema.ImportStatePassthroughContext,
 		},
-		SchemaVersion: 1,
+		SchemaVersion: 2,
+		StateUpgraders: []schema.StateUpgrader{
+			{
+				Version: 1,
+				Type:    resourceTeamSchemaV1().CoreConfigSchema().ImpliedType(),
+				Upgrade: upgradeTeamStateV1,
+			},
+		},
 		Schema: map[string]*schema.Schema{
 			"name": {
 				Description: "The team name",
@@ -64,8 +69,10 @@ func ResourceTeam() *schema.Resource {
 				Description: "IDs of members assigned to the team. If not set, this resource will not manage group members.",
 				Optional:    true,
 				Computed:    true,
-				Type:        schema.TypeSet,
-				Elem:        &schema.Schema{Type: schema.TypeString},
+				// TypeList instead of TypeSet: SDK gRPC forces planned TypeSet into state on apply
+				// errors even when d.Partial(true) is set (DEVTOOLING-1493).
+				Type: schema.TypeList,
+				Elem: &schema.Schema{Type: schema.TypeString},
 			},
 		},
 	}

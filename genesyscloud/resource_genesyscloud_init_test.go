@@ -1,7 +1,6 @@
 package genesyscloud
 
 import (
-	"log"
 	"sync"
 	"testing"
 
@@ -11,7 +10,6 @@ import (
 	authDivision "github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/auth_division"
 	cMessagingSettings "github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/conversations_messaging_settings"
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/group"
-	journeyOutcome "github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/journey_outcome"
 	journeySegment "github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/journey_segment"
 	knowledgeKnowledgebase "github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/knowledge_knowledgebase"
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/location"
@@ -29,14 +27,13 @@ import (
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/user"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 )
 
 var (
 	sdkConfig           *platformclientv2.Configuration
 	providerDataSources map[string]*schema.Resource
 	providerResources   map[string]*schema.Resource
-	err                 error
 	mu                  sync.Mutex
 )
 
@@ -69,7 +66,6 @@ func (r *registerTestInstance) registerTestResources() {
 	providerResources[routingUtilizationLabel.ResourceType] = routingUtilizationLabel.ResourceRoutingUtilizationLabel()
 	providerResources[cMessagingSettings.ResourceType] = cMessagingSettings.ResourceConversationsMessagingSettings()
 	providerResources[extensionPool.ResourceType] = extensionPool.ResourceTelephonyExtensionPool()
-	providerResources[journeyOutcome.ResourceType] = journeyOutcome.ResourceJourneyOutcome()
 	providerResources[knowledgeKnowledgebase.ResourceType] = knowledgeKnowledgebase.ResourceKnowledgeKnowledgebase()
 }
 
@@ -95,9 +91,7 @@ func (r *registerTestInstance) registerTestDataSources() {
 }
 
 func initTestResources() {
-	if sdkConfig, err = provider.AuthorizeSdk(); err != nil {
-		log.Fatal(err)
-	}
+	sdkConfig = provider.SdkConfigurationForTests()
 	providerDataSources = make(map[string]*schema.Resource)
 	providerResources = make(map[string]*schema.Resource)
 	regInstance := &registerTestInstance{}

@@ -6,14 +6,18 @@ description: |-
 ---
 # genesyscloud_idp_ping (Resource)
 
+<!-- This document is automatically generated. Do not edit manually. Make changes to the schema, examples, or apis.md files in examples/resources/ and run 'make docs' to regenerate. -->
+
 Genesys Cloud Single Sign-on Ping Identity Provider. See this page for detailed configuration instructions: https://help.mypurecloud.com/articles/add-ping-identity-single-sign-provider/
 
 ## API Usage
+
 The following Genesys Cloud APIs are used by this resource. Ensure your OAuth Client has been granted the necessary scopes and permissions to perform these operations:
 
-* [GET /api/v2/identityproviders/ping](https://developer.mypurecloud.com/api/rest/v2/identityprovider/#get-api-v2-identityproviders-ping)
-* [PUT /api/v2/identityproviders/ping](https://developer.mypurecloud.com/api/rest/v2/identityprovider/#put-api-v2-identityproviders-ping)
-* [DELETE /api/v2/identityproviders/ping](https://developer.mypurecloud.com/api/rest/v2/identityprovider/#delete-api-v2-identityproviders-ping)
+* [DELETE /api/v2/identityproviders/ping](https://developer.genesys.cloud/devapps/api-explorer#delete-api-v2-identityproviders-ping)
+* [GET /api/v2/identityproviders/ping](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-identityproviders-ping)
+* [PUT /api/v2/identityproviders/ping](https://developer.genesys.cloud/devapps/api-explorer#put-api-v2-identityproviders-ping)
+
 ## Permissions and Scopes
 
 The following permissions are required to use this resource:
@@ -39,6 +43,7 @@ resource "genesyscloud_idp_ping" "ping" {
   target_uri               = "https://example.com/login"
   relying_party_identifier = "unique-id-from-ping"
   sign_authn_requests      = false
+  force_authn              = true
 }
 ```
 
@@ -53,6 +58,7 @@ resource "genesyscloud_idp_ping" "ping" {
 ### Optional
 
 - `disabled` (Boolean) True if Ping is disabled. Defaults to `false`.
+- `force_authn` (Boolean) True if, on inactivity timeout, Genesys Cloud should redirect to the identity provider with the ForceAuthn flag. Defaults to `true`.
 - `name` (String) Name of the provider
 - `relying_party_identifier` (String) String used to identify Genesys Cloud to Ping.
 - `sign_authn_requests` (Boolean) True if the Genesys Cloud authentication request should be signed. Defaults to `false`.

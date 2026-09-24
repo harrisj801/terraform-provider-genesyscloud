@@ -7,12 +7,14 @@ import (
 
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/provider"
 	rc "github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/resource_cache"
+	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/util/page_size"
 
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 )
 
 type getAllRoutingSkillsFunc func(ctx context.Context, p *routingSkillProxy, name string) (*[]platformclientv2.Routingskill, *platformclientv2.APIResponse, error)
 type createRoutingSkillFunc func(ctx context.Context, p *routingSkillProxy, routingSkill *platformclientv2.Createroutingskill) (*platformclientv2.Routingskill, *platformclientv2.APIResponse, error)
+type updateRoutingSkillFunc func(ctx context.Context, p *routingSkillProxy, skillId string, routingSkill *platformclientv2.Updateskilldivisionrequest) (*platformclientv2.Routingskill, *platformclientv2.APIResponse, error)
 type getRoutingSkillByIdFunc func(ctx context.Context, p *routingSkillProxy, id string) (*platformclientv2.Routingskill, *platformclientv2.APIResponse, error)
 type getRoutingSkillIdByNameFunc func(ctx context.Context, p *routingSkillProxy, name string) (string, *platformclientv2.APIResponse, bool, error)
 type deleteRoutingSkillFunc func(ctx context.Context, p *routingSkillProxy, id string) (*platformclientv2.APIResponse, error)
@@ -24,6 +26,7 @@ type routingSkillProxy struct {
 	clientConfig                *platformclientv2.Configuration
 	routingApi                  *platformclientv2.RoutingApi
 	createRoutingSkillAttr      createRoutingSkillFunc
+	updateRoutingSkillAttr      updateRoutingSkillFunc
 	getAllRoutingSkillsAttr     getAllRoutingSkillsFunc
 	getRoutingSkillIdByNameAttr getRoutingSkillIdByNameFunc
 	getRoutingSkillByIdAttr     getRoutingSkillByIdFunc
@@ -38,6 +41,7 @@ func newRoutingSkillProxy(clientConfig *platformclientv2.Configuration) *routing
 		clientConfig:                clientConfig,
 		routingApi:                  api,
 		createRoutingSkillAttr:      createRoutingSkillFn,
+		updateRoutingSkillAttr:      updateRoutingSkillFn,
 		getAllRoutingSkillsAttr:     getAllRoutingSkillsFn,
 		getRoutingSkillIdByNameAttr: getRoutingSkillIdByNameFn,
 		getRoutingSkillByIdAttr:     getRoutingSkillByIdFn,
@@ -58,6 +62,10 @@ func (p *routingSkillProxy) createRoutingSkill(ctx context.Context, routingSkill
 	return p.createRoutingSkillAttr(ctx, p, routingSkill)
 }
 
+func (p *routingSkillProxy) updateRoutingSkill(ctx context.Context, skillId string, routingSkill *platformclientv2.Updateskilldivisionrequest) (*platformclientv2.Routingskill, *platformclientv2.APIResponse, error) {
+	return p.updateRoutingSkillAttr(ctx, p, skillId, routingSkill)
+}
+
 func (p *routingSkillProxy) getRoutingSkillById(ctx context.Context, id string) (*platformclientv2.Routingskill, *platformclientv2.APIResponse, error) {
 	return p.getRoutingSkillByIdAttr(ctx, p, id)
 }
@@ -75,7 +83,7 @@ func getAllRoutingSkillsFn(ctx context.Context, p *routingSkillProxy, name strin
 	ctx = provider.EnsureResourceContext(ctx, ResourceType)
 
 	var allRoutingSkills []platformclientv2.Routingskill
-	const pageSize = 100
+	pageSize := page_size.ForResource(ResourceType, 500)
 
 	routingSkills, resp, err := p.routingApi.GetRoutingSkills(pageSize, 1, name, nil)
 	if err != nil {
@@ -88,18 +96,29 @@ func getAllRoutingSkillsFn(ctx context.Context, p *routingSkillProxy, name strin
 
 	allRoutingSkills = append(allRoutingSkills, *routingSkills.Entities...)
 
-	for pageNum := 2; pageNum <= *routingSkills.PageCount; pageNum++ {
-		routingSkills, _, err := p.routingApi.GetRoutingSkills(pageSize, pageNum, name, nil)
-		if err != nil {
-			return nil, resp, err
-		}
+	totalPages := 1
+	if routingSkills.PageCount != nil {
+		totalPages = *routingSkills.PageCount
+	}
 
-		if routingSkills.Entities == nil || len(*routingSkills.Entities) == 0 {
-			break
-		}
+	allRoutingSkills, resp, err = provider.FetchPagesConcurrently(ctx, ResourceType, allRoutingSkills, resp, totalPages, p.clientConfig,
+		func(ctx context.Context, clientConfig *platformclientv2.Configuration, pageNum int) ([]platformclientv2.Routingskill, *platformclientv2.APIResponse, error) {
+			ctx = provider.EnsureResourceContext(ctx, ResourceType)
+			pageProxy := newRoutingSkillProxy(clientConfig)
+			pageSkills, pageResp, pageErr := pageProxy.routingApi.GetRoutingSkills(pageSize, pageNum, name, nil)
+			if pageErr != nil {
+				return nil, pageResp, fmt.Errorf("failed to get page of routing skills: %w", pageErr)
+			}
 
-		allRoutingSkills = append(allRoutingSkills, *routingSkills.Entities...)
+			if pageSkills.Entities == nil || len(*pageSkills.Entities) == 0 {
+				return []platformclientv2.Routingskill{}, pageResp, nil
+			}
 
+			return *pageSkills.Entities, pageResp, nil
+		},
+	)
+	if err != nil {
+		return nil, resp, err
 	}
 
 	for _, skill := range allRoutingSkills {
@@ -114,6 +133,13 @@ func createRoutingSkillFn(ctx context.Context, p *routingSkillProxy, routingSkil
 	ctx = provider.EnsureResourceContext(ctx, ResourceType)
 
 	return p.routingApi.PostRoutingSkills(*routingSkill)
+}
+
+func updateRoutingSkillFn(ctx context.Context, p *routingSkillProxy, skillId string, routingSkill *platformclientv2.Updateskilldivisionrequest) (*platformclientv2.Routingskill, *platformclientv2.APIResponse, error) {
+	// Set resource context for SDK debug logging
+	ctx = provider.EnsureResourceContext(ctx, ResourceType)
+
+	return p.routingApi.PatchRoutingSkill(skillId, *routingSkill)
 }
 
 func getRoutingSkillByIdFn(ctx context.Context, p *routingSkillProxy, id string) (*platformclientv2.Routingskill, *platformclientv2.APIResponse, error) {

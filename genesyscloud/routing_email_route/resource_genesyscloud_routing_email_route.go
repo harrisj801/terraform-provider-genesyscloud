@@ -13,7 +13,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/consistency_checker"
 
@@ -33,7 +33,7 @@ func getAllRoutingEmailRoutes(ctx context.Context, clientConfig *platformclientv
 
 	inboundRoutesMap, respCode, err := proxy.getAllRoutingEmailRoute(ctx, "", "")
 	if err != nil {
-		return nil, util.BuildAPIDiagnosticError(ResourceType, "Failed to get routing email route", respCode)
+		return nil, util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to get routing email route error: %s", err), respCode)
 	}
 
 	if inboundRoutesMap == nil || len(*inboundRoutesMap) == 0 {
@@ -127,6 +127,7 @@ func readRoutingEmailRoute(ctx context.Context, d *schema.ResourceData, meta int
 		resourcedata.SetNillableValueWithInterfaceArrayWithFunc(d, "auto_bcc", route.AutoBcc, flattenAutoBccEmailAddress)
 		resourcedata.SetNillableReference(d, "spam_flow_id", route.SpamFlow)
 		resourcedata.SetNillableValue(d, "allow_multiple_actions", route.AllowMultipleActions)
+		resourcedata.SetNillableValueWithInterfaceArrayWithFunc(d, "signature", route.Signature, flattenSignature)
 
 		if route.Skills != nil {
 			_ = d.Set("skill_ids", util.SdkDomainEntityRefArrToSet(*route.Skills))
@@ -149,6 +150,10 @@ func readRoutingEmailRoute(ctx context.Context, d *schema.ResourceData, meta int
 			_ = d.Set("reply_email_address", []interface{}{flattenedEmails})
 		} else {
 			_ = d.Set("reply_email_address", nil)
+		}
+
+		if route.MailboxFolders != nil {
+			_ = d.Set("mailbox_folders", *route.MailboxFolders)
 		}
 
 		log.Printf("Read routing email route %s", d.Id())

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,7 +20,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 )
 
 func TestAccResourceRoutingEmailDomainSub(t *testing.T) {
@@ -44,10 +46,6 @@ func TestAccResourceRoutingEmailDomainSub(t *testing.T) {
 					util.NullValue,
 				),
 				Check: resource.ComposeTestCheckFunc( //Wait for resource creatio
-					func(state *terraform.State) error {
-						time.Sleep(45 * time.Second)
-						return nil
-					},
 					resource.TestCheckResourceAttr("genesyscloud_routing_email_domain."+domainResourceLabel, "domain_id", domainId),
 					resource.TestCheckResourceAttr("genesyscloud_routing_email_domain."+domainResourceLabel, "subdomain", util.TrueValue),
 				),
@@ -138,4 +136,59 @@ func testVerifyRoutingEmailDomainDestroyed(state *terraform.State) error {
 
 	// Success. All Domains destroyed
 	return nil
+}
+
+func TestAccResourceRoutingEmailDomainGraphApi(t *testing.T) {
+	// This test requires Azure Graph Api integration which is only available in us-east-1
+	region := os.Getenv("GENESYSCLOUD_REGION")
+	if region != "us-east-1" {
+		t.Skipf("Skipping TestAccResourceRoutingEmailDomainGraphApi: Azure Graph Api integration only available in us-east-1 (current region: %s)", region)
+	}
+
+	var (
+		domainResourceLabel = "routing-domain-graph"
+		domainId            = fmt.Sprintf("defaultgraph%04d.inindca.com", rand.Intn(10000))
+	)
+
+	if cleanupErr := CleanupRoutingEmailDomains("defaultgraph"); cleanupErr != nil {
+		t.Logf("Failed to clean up routing email domains: %v", cleanupErr)
+	}
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { util.TestAccPreCheck(t) },
+		ProviderFactories: provider.GetProviderFactories(providerResources, providerDataSources),
+		Steps: []resource.TestStep{
+			{
+				// Create email domain with graph_api_settings referencing existing Azure Graph Api integration
+				Config: fmt.Sprintf(`
+data "genesyscloud_integration" "Azure_Graph_Api" {
+  name = "Azure Graph Api"
+}
+
+resource "genesyscloud_routing_email_domain" "%s" {
+  domain_id = "%s"
+  subdomain = false
+  graph_api_settings {
+    integration_id = data.genesyscloud_integration.Azure_Graph_Api.id
+  }
+}
+`, domainResourceLabel, domainId),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("genesyscloud_routing_email_domain."+domainResourceLabel, "domain_id", domainId),
+					resource.TestCheckResourceAttr("genesyscloud_routing_email_domain."+domainResourceLabel, "subdomain", "false"),
+					resource.TestCheckResourceAttrPair(
+						"genesyscloud_routing_email_domain."+domainResourceLabel, "graph_api_settings.0.integration_id",
+						"data.genesyscloud_integration.Azure_Graph_Api", "id",
+					),
+				),
+			},
+			{
+				// Import/Read
+				ResourceName:      "genesyscloud_routing_email_domain." + domainResourceLabel,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+		CheckDestroy: testVerifyRoutingEmailDomainDestroyed,
+	})
 }

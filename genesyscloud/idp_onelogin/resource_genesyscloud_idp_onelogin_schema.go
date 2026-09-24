@@ -3,6 +3,7 @@ package idp_onelogin
 // @team: GC IAM (Auth/Donut)
 // @chat: #gc-iam-auth-donut
 // @jira: IAM
+// @pm: David Murray
 // @description: Manages Single Sign-On (SSO) identity provider integrations for Genesys Cloud. Configures SAML-based authentication with external identity providers to enable federated login.
 
 import (
@@ -102,6 +103,12 @@ func ResourceIdpOnelogin() *schema.Resource {
 				Type:        schema.TypeBool,
 				Default:     false,
 			},
+			`force_authn`: {
+				Description: `True if, on inactivity timeout, Genesys Cloud should redirect to the identity provider with the ForceAuthn flag.`,
+				Optional:    true,
+				Default:     true,
+				Type:        schema.TypeBool,
+			},
 		},
 	}
 }
@@ -110,6 +117,8 @@ func ResourceIdpOnelogin() *schema.Resource {
 func IdpOneloginExporter() *resourceExporter.ResourceExporter {
 	return &resourceExporter.ResourceExporter{
 		GetResourcesFunc: provider.GetAllWithPooledClient(getAllAuthIdpOnelogins),
+		IsSingleton:      true,
+		ExportId:         ResourceType,
 		RefAttrs:         map[string]*resourceExporter.RefAttrSettings{
 			// TODO: Add any reference attributes here
 		},

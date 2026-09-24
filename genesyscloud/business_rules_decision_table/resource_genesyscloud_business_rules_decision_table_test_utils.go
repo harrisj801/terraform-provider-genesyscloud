@@ -5,7 +5,7 @@ import (
 
 	"log"
 
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 )
 
 // generateBusinessRulesDecisionTableResource generates a basic business rules decision table resource
@@ -26,6 +26,168 @@ func generateBusinessRulesDecisionTableResource(
 		%s
 	}
 	`, resourceLabel, name, description, divisionId, schemaId, columns, rows)
+}
+
+// generateBusinessRulesDecisionTableResourceCSV is the CSV-backed form of the resource (no nested rows).
+func generateBusinessRulesDecisionTableResourceCSV(
+	resourceLabel string,
+	name string,
+	description string,
+	divisionId string,
+	schemaId string,
+	columns string,
+	csvPath string) string {
+	return fmt.Sprintf(`resource "genesyscloud_business_rules_decision_table" "%s" {
+		name = "%s"
+		description = "%s"
+		division_id = %s
+		schema_id = %s
+		%s
+		rows_csv_filepath = "%s"
+	}
+	`, resourceLabel, name, description, divisionId, schemaId, columns, csvPath)
+}
+
+// generateMinimalColumnsForCSVMigration is a small column set for rows→CSV migration ACC tests.
+func generateMinimalColumnsForCSVMigration() string {
+	return `columns {
+		inputs {
+			defaults_to {
+				special = "Wildcard"
+			}
+			expression {
+				contractual {
+					schema_property_key = "customer_type"
+				}
+				comparator = "Equals"
+			}
+		}
+		outputs {
+			defaults_to {
+				special = "Null"
+			}
+			value {
+				schema_property_key = "skill"
+			}
+		}
+	}`
+}
+
+func generateMinimalRowsForCSVMigration() string {
+	return `rows {
+		inputs {
+			literal {
+				value = "VIP"
+				type  = "string"
+			}
+		}
+		outputs {
+			literal {
+				value = "Premium Support"
+				type  = "string"
+			}
+		}
+	}`
+}
+
+// generateColumnsForCSVStringList extends the minimal CSV column set with stringList
+// input/output columns (customer_tags::ContainsAny, assigned_skills) for ACC coverage
+// of the '||' CSV delimiter.
+func generateColumnsForCSVStringList() string {
+	return `columns {
+		inputs {
+			defaults_to {
+				special = "Wildcard"
+			}
+			expression {
+				contractual {
+					schema_property_key = "customer_type"
+				}
+				comparator = "Equals"
+			}
+		}
+		inputs {
+			defaults_to {
+				values = ["general", "support"]
+			}
+			expression {
+				contractual {
+					schema_property_key = "customer_tags"
+				}
+				comparator = "ContainsAny"
+			}
+		}
+		outputs {
+			defaults_to {
+				special = "Null"
+			}
+			value {
+				schema_property_key = "skill"
+			}
+		}
+		outputs {
+			defaults_to {
+				values = ["basic_support", "general_help"]
+			}
+			value {
+				schema_property_key = "assigned_skills"
+			}
+		}
+	}`
+}
+
+// generateColumnsForCSVQueue is a minimal column set with a queue output column
+// (transfer_queue) for CSV ACC tests that resolve queue friendly names.
+func generateColumnsForCSVQueue(queueResourceLabel string) string {
+	return fmt.Sprintf(`columns {
+		inputs {
+			defaults_to {
+				special = "Wildcard"
+			}
+			expression {
+				contractual {
+					schema_property_key = "customer_type"
+				}
+				comparator = "Equals"
+			}
+		}
+		outputs {
+			defaults_to {
+				value = genesyscloud_routing_queue.%s.id
+			}
+			value {
+				schema_property_key = "transfer_queue"
+				properties {
+					schema_property_key = "queue"
+					properties {
+						schema_property_key = "id"
+					}
+				}
+			}
+		}
+	}`, queueResourceLabel)
+}
+
+// generateBusinessRulesDecisionTableResourceBothRowsAndCSV is for ExactlyOneOf validation ACC.
+func generateBusinessRulesDecisionTableResourceBothRowsAndCSV(
+	resourceLabel string,
+	name string,
+	description string,
+	divisionId string,
+	schemaId string,
+	columns string,
+	rows string,
+	csvPath string) string {
+	return fmt.Sprintf(`resource "genesyscloud_business_rules_decision_table" "%s" {
+		name = "%s"
+		description = "%s"
+		division_id = %s
+		schema_id = %s
+		%s
+		%s
+		rows_csv_filepath = "%s"
+	}
+	`, resourceLabel, name, description, divisionId, schemaId, columns, rows, csvPath)
 }
 
 func generateColumns(queueResourceLabel string) string {
@@ -719,4 +881,352 @@ func generateBusinessRulesSchemaResource(resourceLabel, name, description string
 		})
 	}
 	`, resourceLabel, name, description)
+}
+
+// generateRowsWithWhitespaceEdgeCases generates rows identical to generateRows() but with
+// whitespace edge cases that reproduce the customer issue from RULES-1491:
+// - "John Doe " (trailing space on customer_name string)
+// - "vip, premium, support" (spaces after commas in stringList)
+// - "Premium Support " (trailing space on output string)
+// - "premium_support, escalation, technical_expert" (spaces after commas in output stringList)
+// All other values are identical to generateRows() so the only differences are whitespace.
+func generateRowsWithWhitespaceEdgeCases(queueResourceLabel string) string {
+	return `rows {
+		inputs {
+			literal {
+				value = "VIP"
+				type  = "string"
+			}
+		}
+		inputs {
+			literal {
+				value = "John Doe "
+				type  = "string"
+			}
+		}
+		inputs {
+			literal {
+				value = "5"
+				type  = "integer"
+			}
+		}
+		inputs {
+			literal {
+				value = "85.5"
+				type  = "number"
+			}
+		}
+		inputs {
+			literal {
+				value = "2023-01-15"
+				type  = "date"
+			}
+		}
+		inputs {
+			literal {
+				value = "2023-01-15T10:30:00.000Z"
+				type  = "datetime"
+			}
+		}
+		inputs {
+			literal {
+				value = "true"
+				type  = "boolean"
+			}
+		}
+		inputs {
+			literal {
+				value = ""
+				type  = ""
+			}
+		}
+		inputs {
+			literal {
+				value = "vip, premium, support"
+				type  = "stringList"
+			}
+		}
+		outputs {
+			literal {
+				value = genesyscloud_routing_queue.` + queueResourceLabel + `.id
+				type  = "string"
+			}
+		}
+		outputs {
+			literal {
+				value = "Premium Support "
+				type  = "string"
+			}
+		}
+		outputs {
+			literal {}
+		}
+		outputs {
+			literal {
+				value = "premium_support, escalation, technical_expert"
+				type  = "stringList"
+			}
+		}
+	}`
+}
+
+// generateRowsWithRealContentChange generates rows with actual content differences from
+// generateRows() to verify that real changes still trigger updates after diff suppression
+// is added. Changes: "John Doe" -> "Jane Smith", "Premium Support" -> "Standard Support"
+func generateRowsWithRealContentChange(queueResourceLabel string) string {
+	return `rows {
+		inputs {
+			literal {
+				value = "VIP"
+				type  = "string"
+			}
+		}
+		inputs {
+			literal {
+				value = "Jane Smith"
+				type  = "string"
+			}
+		}
+		inputs {
+			literal {
+				value = "5"
+				type  = "integer"
+			}
+		}
+		inputs {
+			literal {
+				value = "85.5"
+				type  = "number"
+			}
+		}
+		inputs {
+			literal {
+				value = "2023-01-15"
+				type  = "date"
+			}
+		}
+		inputs {
+			literal {
+				value = "2023-01-15T10:30:00.000Z"
+				type  = "datetime"
+			}
+		}
+		inputs {
+			literal {
+				value = "true"
+				type  = "boolean"
+			}
+		}
+		inputs {
+			literal {
+				value = ""
+				type  = ""
+			}
+		}
+		inputs {
+			literal {
+				value = "vip,premium,support"
+				type  = "stringList"
+			}
+		}
+		outputs {
+			literal {
+				value = genesyscloud_routing_queue.` + queueResourceLabel + `.id
+				type  = "string"
+			}
+		}
+		outputs {
+			literal {
+				value = "Standard Support"
+				type  = "string"
+			}
+		}
+		outputs {
+			literal {}
+		}
+		outputs {
+			literal {
+				value = "premium_support,escalation,technical_expert"
+				type  = "stringList"
+			}
+		}
+	}`
+}
+
+// generateRowsWithRealContentChangeAndWhitespace is the same as generateRowsWithRealContentChange
+// but with whitespace padding added. Used to verify diff suppression works after an update too.
+// "Jane Smith" -> "Jane Smith ", "Standard Support" -> "Standard Support "
+func generateRowsWithRealContentChangeAndWhitespace(queueResourceLabel string) string {
+	return `rows {
+		inputs {
+			literal {
+				value = "VIP"
+				type  = "string"
+			}
+		}
+		inputs {
+			literal {
+				value = "Jane Smith "
+				type  = "string"
+			}
+		}
+		inputs {
+			literal {
+				value = "5"
+				type  = "integer"
+			}
+		}
+		inputs {
+			literal {
+				value = "85.5"
+				type  = "number"
+			}
+		}
+		inputs {
+			literal {
+				value = "2023-01-15"
+				type  = "date"
+			}
+		}
+		inputs {
+			literal {
+				value = "2023-01-15T10:30:00.000Z"
+				type  = "datetime"
+			}
+		}
+		inputs {
+			literal {
+				value = "true"
+				type  = "boolean"
+			}
+		}
+		inputs {
+			literal {
+				value = ""
+				type  = ""
+			}
+		}
+		inputs {
+			literal {
+				value = "vip, premium, support"
+				type  = "stringList"
+			}
+		}
+		outputs {
+			literal {
+				value = genesyscloud_routing_queue.` + queueResourceLabel + `.id
+				type  = "string"
+			}
+		}
+		outputs {
+			literal {
+				value = "Standard Support "
+				type  = "string"
+			}
+		}
+		outputs {
+			literal {}
+		}
+		outputs {
+			literal {
+				value = "premium_support, escalation, technical_expert"
+				type  = "stringList"
+			}
+		}
+	}`
+}
+
+// generateChainRow produces a single decision table row for the RULES-1907
+// reproduction. All input columns are kept identical across rows except
+// customer_type, so two rows differ only by that value. Changing customer_type on
+// an update (for example moving one row onto the value another row still has) is
+// exactly the chain that made the provider update rows into a brief duplicate
+// state and fail with a 409. queueResourceLabel wires the required transfer_queue
+// output to a real queue.
+func generateChainRow(queueResourceLabel, customerType string) string {
+	return `rows {
+		inputs {
+			literal {
+				value = "` + customerType + `"
+				type  = "string"
+			}
+		}
+		inputs {
+			literal {
+				value = "Chain Customer"
+				type  = "string"
+			}
+		}
+		inputs {
+			literal {
+				value = "5"
+				type  = "integer"
+			}
+		}
+		inputs {
+			literal {
+				value = "85.5"
+				type  = "number"
+			}
+		}
+		inputs {
+			literal {
+				value = "2023-01-15"
+				type  = "date"
+			}
+		}
+		inputs {
+			literal {
+				value = "2023-01-15T10:30:00.000Z"
+				type  = "datetime"
+			}
+		}
+		inputs {
+			literal {
+				value = "true"
+				type  = "boolean"
+			}
+		}
+		inputs {
+			literal {
+				value = ""
+				type  = ""
+			}
+		}
+		inputs {
+			literal {
+				value = "vip,premium,support"
+				type  = "stringList"
+			}
+		}
+		outputs {
+			literal {
+				value = genesyscloud_routing_queue.` + queueResourceLabel + `.id
+				type  = "string"
+			}
+		}
+		outputs {
+			literal {
+				value = "Chain Support"
+				type  = "string"
+			}
+		}
+		outputs {
+			literal {}
+		}
+		outputs {
+			literal {
+				value = "chain_support,general_help"
+				type  = "stringList"
+			}
+		}
+	}
+`
+}
+
+// GenerateRowsCSVFilepath returns HCL for the CSV filepath attribute.
+func GenerateRowsCSVFilepath(path string) string {
+	return fmt.Sprintf(`
+	rows_csv_filepath = "%s"
+`, path)
 }

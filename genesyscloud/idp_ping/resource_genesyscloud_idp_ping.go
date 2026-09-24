@@ -12,7 +12,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/consistency_checker"
 
@@ -45,7 +45,7 @@ func getAllAuthIdpPings(ctx context.Context, clientConfig *platformclientv2.Conf
 		return nil, util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to get IDP Ping error: %s", err), resp)
 	}
 
-	resources["0"] = &resourceExporter.ResourceMeta{BlockLabel: "ping"}
+	resources[ResourceType] = &resourceExporter.ResourceMeta{BlockLabel: "ping"}
 	return resources, nil
 }
 
@@ -83,6 +83,7 @@ func readIdpPing(ctx context.Context, d *schema.ResourceData, meta interface{}) 
 		resourcedata.SetNillableValue(d, "slo_uri", pingIdentity.SloURI)
 		resourcedata.SetNillableValue(d, "slo_binding", pingIdentity.SloBinding)
 		resourcedata.SetNillableValue(d, "sign_authn_requests", pingIdentity.SignAuthnRequests)
+		resourcedata.SetNillableValue(d, "force_authn", pingIdentity.ForceAuthn)
 
 		if pingIdentity.Certificate != nil {
 			d.Set("certificates", lists.StringListToInterfaceList([]string{*pingIdentity.Certificate}))
@@ -158,5 +159,6 @@ func getIdpPingFromResourceData(d *schema.ResourceData) platformclientv2.Pingide
 		SloURI:                 platformclientv2.String(d.Get("slo_uri").(string)),
 		SloBinding:             platformclientv2.String(d.Get("slo_binding").(string)),
 		SignAuthnRequests:      platformclientv2.Bool(d.Get("sign_authn_requests").(bool)),
+		ForceAuthn:             platformclientv2.Bool(d.Get("force_authn").(bool)),
 	}
 }

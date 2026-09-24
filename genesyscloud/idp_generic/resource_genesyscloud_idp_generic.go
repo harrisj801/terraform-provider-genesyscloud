@@ -12,7 +12,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/consistency_checker"
 
@@ -45,7 +45,7 @@ func getAllAuthIdpGenerics(ctx context.Context, clientConfig *platformclientv2.C
 		return nil, util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to get IDP Generic error: %s", getErr), resp)
 	}
 
-	resources["0"] = &resourceExporter.ResourceMeta{BlockLabel: "generic"}
+	resources[ResourceType] = &resourceExporter.ResourceMeta{BlockLabel: "generic"}
 	return resources, nil
 }
 
@@ -86,6 +86,7 @@ func readIdpGeneric(ctx context.Context, d *schema.ResourceData, meta interface{
 		resourcedata.SetNillableValue(d, "endpoint_compression", genericSAML.EndpointCompression)
 		resourcedata.SetNillableValue(d, "name_identifier_format", genericSAML.NameIdentifierFormat)
 		resourcedata.SetNillableValue(d, "sign_authn_requests", genericSAML.SignAuthnRequests)
+		resourcedata.SetNillableValue(d, "force_authn", genericSAML.ForceAuthn)
 
 		if genericSAML.Certificate != nil {
 			d.Set("certificates", lists.StringListToInterfaceList([]string{*genericSAML.Certificate}))
@@ -165,5 +166,6 @@ func getIdpGenericFromResourceData(d *schema.ResourceData) platformclientv2.Gene
 		SloURI:                 platformclientv2.String(d.Get("slo_uri").(string)),
 		SloBinding:             platformclientv2.String(d.Get("slo_binding").(string)),
 		SignAuthnRequests:      platformclientv2.Bool(d.Get("sign_authn_requests").(bool)),
+		ForceAuthn:             platformclientv2.Bool(d.Get("force_authn").(bool)),
 	}
 }

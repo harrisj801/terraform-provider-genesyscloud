@@ -6,16 +6,19 @@ description: |-
 ---
 # genesyscloud_outbound_campaignrule (Resource)
 
+<!-- This document is automatically generated. Do not edit manually. Make changes to the schema, examples, or apis.md files in examples/resources/ and run 'make docs' to regenerate. -->
+
 Genesys Cloud outbound campaign rule
 
 ## API Usage
+
 The following Genesys Cloud APIs are used by this resource. Ensure your OAuth Client has been granted the necessary scopes and permissions to perform these operations:
 
 * [GET /api/v2/outbound/campaignrules](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-outbound-campaignrules)
-* [GET /api/v2/outbound/campaignrules/{campaignRuleId}](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-outbound-campaignrules--campaignRuleId-)
 * [POST /api/v2/outbound/campaignrules](https://developer.genesys.cloud/devapps/api-explorer#post-api-v2-outbound-campaignrules)
-* [PUT /api/v2/outbound/campaignrules/{campaignRuleId}](https://developer.genesys.cloud/devapps/api-explorer#put-api-v2-outbound-campaignrules--campaignRuleId-)
 * [DELETE /api/v2/outbound/campaignrules/{campaignRuleId}](https://developer.genesys.cloud/devapps/api-explorer#delete-api-v2-outbound-campaignrules--campaignRuleId-)
+* [GET /api/v2/outbound/campaignrules/{campaignRuleId}](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-outbound-campaignrules--campaignRuleId-)
+* [PUT /api/v2/outbound/campaignrules/{campaignRuleId}](https://developer.genesys.cloud/devapps/api-explorer#put-api-v2-outbound-campaignrules--campaignRuleId-)
 
 ## Permissions and Scopes
 
@@ -74,14 +77,18 @@ resource "genesyscloud_outbound_campaignrule" "campaign_rule" {
 ### Required
 
 - `campaign_rule_actions` (Block List, Min: 1) The list of actions that are executed if the conditions are satisfied. (see [below for nested schema](#nestedblock--campaign_rule_actions))
-- `campaign_rule_conditions` (Block List, Min: 1) The list of conditions that are evaluated on the entities. (see [below for nested schema](#nestedblock--campaign_rule_conditions))
 - `campaign_rule_entities` (Block Set, Min: 1, Max: 1) The list of entities that this campaign rule monitors. (see [below for nested schema](#nestedblock--campaign_rule_entities))
 - `name` (String) The name of the campaign rule.
 
 ### Optional
 
+- `campaign_rule_conditions` (Block List) The list of conditions that are evaluated on the entities. Required when not using condition_groups (campaign_rule_processing "v2"). (see [below for nested schema](#nestedblock--campaign_rule_conditions))
+- `campaign_rule_processing` (String) Campaign rule processing algorithm. Use "v2" to enable condition groups.
+- `condition_groups` (Block List) List of condition groups that are evaluated, used only with campaignRuleProcessing="v2". (see [below for nested schema](#nestedblock--condition_groups))
 - `enabled` (Boolean) Whether or not this campaign rule is currently enabled. Defaults to `false`.
+- `execution_settings` (Block List, Max: 1) Campaign rule execution settings. (see [below for nested schema](#nestedblock--execution_settings))
 - `match_any_conditions` (Boolean) Whether actions are executed if any condition is met, or only when all conditions are met. Defaults to `false`.
+- `time_zone_id` (String) Optional. Used for date/time conditions. If omitted, Genesys Cloud defaults to UTC.
 
 ### Read-Only
 
@@ -123,41 +130,7 @@ Optional:
 - `email_messages_per_minute` (String) The number of messages per minute to set an Email messaging campaign to.
 - `max_calls_per_agent` (String) Max calls per agent. Optional parameter for 'setCampaignMaxCallsPerAgent' action
 - `messages_per_minute` (String) The number of messages per minute to set a messaging campaign to.
-- `operator` (String) The operator for comparison. Required for a CampaignRuleCondition.
-- `outbound_line_count` (String) Number of Outbound lines. Required for 'setCampaignNumberOfLines' action
-- `priority` (String) The priority to set a campaign to (1 | 2 | 3 | 4 | 5). Required for the 'setCampaignPriority' action.
-- `queue_id` (String) The ID of the Queue. Required for 'changeCampaignQueue' action
-- `relative_weight` (String) Relative weight. Required for 'setCampaignWeight' action
-- `sms_content_template_id` (String) The content template to set a SMS campaign to.
-- `sms_messages_per_minute` (String) The number of messages per minute to set a SMS messaging campaign to.
-- `value` (String) The value for comparison. Required for a CampaignRuleCondition.
-
-
-
-<a id="nestedblock--campaign_rule_conditions"></a>
-### Nested Schema for `campaign_rule_conditions`
-
-Required:
-
-- `condition_type` (String) The type of condition to evaluate (campaignProgress | campaignAgents | campaignRecordsAttempted | campaignContactsMessaged | campaignBusinessSuccess | campaignBusinessNeutral | campaignBusinessFailure | campaignValidAttempts | campaignRightPartyContacts)
-- `parameters` (Block Set, Min: 1) The parameters for the CampaignRuleCondition. (see [below for nested schema](#nestedblock--campaign_rule_conditions--parameters))
-
-Optional:
-
-- `id` (String) The ID of the CampaignRuleCondition.
-
-<a id="nestedblock--campaign_rule_conditions--parameters"></a>
-### Nested Schema for `campaign_rule_conditions.parameters`
-
-Optional:
-
-- `abandon_rate` (String) Compliance Abandon Rate. Required for 'setCampaignAbandonRate' action
-- `dialing_mode` (String) The dialing mode to set a campaign to. Required for the 'setCampaignDialingMode' action (agentless | preview | power | predictive | progressive | external).
-- `email_content_template_id` (String) The content template to set an Email campaign to.
-- `email_messages_per_minute` (String) The number of messages per minute to set an Email messaging campaign to.
-- `max_calls_per_agent` (String) Max calls per agent. Optional parameter for 'setCampaignMaxCallsPerAgent' action
-- `messages_per_minute` (String) The number of messages per minute to set a messaging campaign to.
-- `operator` (String) The operator for comparison. Required for a CampaignRuleCondition.
+- `operator` (String) The operator for comparison. Required for a CampaignRuleCondition. Valid values: equals, greaterThan, greaterThanEqualTo, lessThan, lessThanEqualTo.
 - `outbound_line_count` (String) Number of Outbound lines. Required for 'setCampaignNumberOfLines' action
 - `priority` (String) The priority to set a campaign to (1 | 2 | 3 | 4 | 5). Required for the 'setCampaignPriority' action.
 - `queue_id` (String) The ID of the Queue. Required for 'changeCampaignQueue' action
@@ -177,4 +150,419 @@ Optional:
 - `email_campaign_ids` (List of String) The list of Email campaigns for a CampaignRule to monitor. Required if the CampaignRule has any conditions that run on an Email campaign. Changing the outboundCampaignRuleEntityCampaignRuleId attribute will cause the outbound_campaignrule object to be dropped and recreated with a new ID.
 - `sequence_ids` (List of String) The list of sequences for a CampaignRule to monitor. Required if the CampaignRule has any conditions that run on a sequence. Changing the outboundCampaignRuleEntitySequenceRuleId attribute will cause the outbound_campaignrule object to be dropped and recreated with a new ID.
 - `sms_campaign_ids` (List of String) The list of SMS campaigns for a CampaignRule to monitor. Required if the CampaignRule has any conditions that run on an SMS campaign. Changing the outboundCampaignRuleEntityCampaignRuleId attribute will cause the outbound_campaignrule object to be dropped and recreated with a new ID.
+
+
+<a id="nestedblock--campaign_rule_conditions"></a>
+### Nested Schema for `campaign_rule_conditions`
+
+Required:
+
+- `condition_type` (String) The type of condition to evaluate (campaignProgress | campaignAgents | campaignRecordsAttempted | campaignContactsMessaged | campaignBusinessSuccess | campaignBusinessNeutral | campaignBusinessFailure | campaignValidAttempts | campaignRightPartyContacts | timeOfDay | dayOfWeek | dayOfMonth | weekDayOfMonth | specificDate | campaignRunTime | campaignWaitTime)
+- `parameters` (Block Set, Min: 1) The parameters for the CampaignRuleCondition. (see [below for nested schema](#nestedblock--campaign_rule_conditions--parameters))
+
+Optional:
+
+- `campaign_run_time_settings` (Block List, Max: 1) Settings for campaignRunTime conditions. Only valid with campaign_rule_processing = "v2" and condition_groups. (see [below for nested schema](#nestedblock--campaign_rule_conditions--campaign_run_time_settings))
+- `campaign_wait_time_settings` (Block List, Max: 1) Settings for campaignWaitTime conditions. Only valid with campaign_rule_processing = "v2" and condition_groups. (see [below for nested schema](#nestedblock--campaign_rule_conditions--campaign_wait_time_settings))
+- `date_time_parameters` (Block List, Max: 1) Parameters for date/time conditions (timeOfDay, dayOfWeek, dayOfMonth, specificDate, weekDayOfMonth). Only valid with campaign_rule_processing = "v2" and condition_groups. (see [below for nested schema](#nestedblock--campaign_rule_conditions--date_time_parameters))
+- `id` (String) The ID of the CampaignRuleCondition.
+
+<a id="nestedblock--campaign_rule_conditions--parameters"></a>
+### Nested Schema for `campaign_rule_conditions.parameters`
+
+Optional:
+
+- `abandon_rate` (String) Compliance Abandon Rate. Required for 'setCampaignAbandonRate' action
+- `dialing_mode` (String) The dialing mode to set a campaign to. Required for the 'setCampaignDialingMode' action (agentless | preview | power | predictive | progressive | external).
+- `email_content_template_id` (String) The content template to set an Email campaign to.
+- `email_messages_per_minute` (String) The number of messages per minute to set an Email messaging campaign to.
+- `max_calls_per_agent` (String) Max calls per agent. Optional parameter for 'setCampaignMaxCallsPerAgent' action
+- `messages_per_minute` (String) The number of messages per minute to set a messaging campaign to.
+- `operator` (String) The operator for comparison. Required for a CampaignRuleCondition. Valid values: equals, greaterThan, greaterThanEqualTo, lessThan, lessThanEqualTo, before, after, between, in.
+- `outbound_line_count` (String) Number of Outbound lines. Required for 'setCampaignNumberOfLines' action
+- `priority` (String) The priority to set a campaign to (1 | 2 | 3 | 4 | 5). Required for the 'setCampaignPriority' action.
+- `queue_id` (String) The ID of the Queue. Required for 'changeCampaignQueue' action
+- `relative_weight` (String) Relative weight. Required for 'setCampaignWeight' action
+- `sms_content_template_id` (String) The content template to set a SMS campaign to.
+- `sms_messages_per_minute` (String) The number of messages per minute to set a SMS messaging campaign to.
+- `value` (String) The value for comparison. Required for a CampaignRuleCondition.
+
+
+<a id="nestedblock--campaign_rule_conditions--campaign_run_time_settings"></a>
+### Nested Schema for `campaign_rule_conditions.campaign_run_time_settings`
+
+Optional:
+
+- `include_waiting_time` (Boolean) When true, counts all campaign running time. When false, only counts time when campaign is not waiting. Defaults to `true`.
+
+
+<a id="nestedblock--campaign_rule_conditions--campaign_wait_time_settings"></a>
+### Nested Schema for `campaign_rule_conditions.campaign_wait_time_settings`
+
+Required:
+
+- `wait_type` (String) Campaign wait type (Agents | Contacts | Lines).
+
+
+<a id="nestedblock--campaign_rule_conditions--date_time_parameters"></a>
+### Nested Schema for `campaign_rule_conditions.date_time_parameters`
+
+Optional:
+
+- `day_of_month` (Block List, Max: 1) Parameters for dayOfMonth condition type. (see [below for nested schema](#nestedblock--campaign_rule_conditions--date_time_parameters--day_of_month))
+- `day_of_week` (Block List, Max: 1) Parameters for dayOfWeek condition type. (see [below for nested schema](#nestedblock--campaign_rule_conditions--date_time_parameters--day_of_week))
+- `inverted` (Boolean) If true, inverts the result of evaluating this condition. Defaults to `false`.
+- `specific_date` (Block List, Max: 1) Parameters for specificDate condition type. (see [below for nested schema](#nestedblock--campaign_rule_conditions--date_time_parameters--specific_date))
+- `time_of_day` (Block List, Max: 1) Parameters for timeOfDay condition type. (see [below for nested schema](#nestedblock--campaign_rule_conditions--date_time_parameters--time_of_day))
+- `week_day_of_month` (Block List, Max: 1) Parameters for weekDayOfMonth condition type. (see [below for nested schema](#nestedblock--campaign_rule_conditions--date_time_parameters--week_day_of_month))
+
+<a id="nestedblock--campaign_rule_conditions--date_time_parameters--day_of_month"></a>
+### Nested Schema for `campaign_rule_conditions.date_time_parameters.day_of_month`
+
+Optional:
+
+- `in_set` (List of String) Days of month (1-31, "LAST_DAY", "EVEN_DAY", "ODD_DAY") for "equals"/"in" operators.
+- `interval` (Block List, Max: 1) Day interval for "between" operator. (see [below for nested schema](#nestedblock--campaign_rule_conditions--date_time_parameters--day_of_month--interval))
+- `threshold_value` (String) Day of month (1-31 or "LAST_DAY") for "before"/"after" operators.
+
+<a id="nestedblock--campaign_rule_conditions--date_time_parameters--day_of_month--interval"></a>
+### Nested Schema for `campaign_rule_conditions.date_time_parameters.day_of_month.interval`
+
+Required:
+
+- `max` (String) Maximum day (1-31 or "LAST_DAY").
+- `min` (String) Minimum day (1-31).
+
+
+
+<a id="nestedblock--campaign_rule_conditions--date_time_parameters--day_of_week"></a>
+### Nested Schema for `campaign_rule_conditions.date_time_parameters.day_of_week`
+
+Optional:
+
+- `in_set` (List of Number) Days of week (1=Monday, 7=Sunday) for "equals"/"in" operators.
+- `interval` (Block List, Max: 1) Day interval for "between" operator. (see [below for nested schema](#nestedblock--campaign_rule_conditions--date_time_parameters--day_of_week--interval))
+
+<a id="nestedblock--campaign_rule_conditions--date_time_parameters--day_of_week--interval"></a>
+### Nested Schema for `campaign_rule_conditions.date_time_parameters.day_of_week.interval`
+
+Required:
+
+- `max` (Number) Maximum day (1-7).
+- `min` (Number) Minimum day (1-7).
+
+
+
+<a id="nestedblock--campaign_rule_conditions--date_time_parameters--specific_date"></a>
+### Nested Schema for `campaign_rule_conditions.date_time_parameters.specific_date`
+
+Optional:
+
+- `include_year` (Boolean) If true, includes year in date comparison. Defaults to `true`.
+- `interval` (Block List, Max: 1) Date interval for "between" operator. (see [below for nested schema](#nestedblock--campaign_rule_conditions--date_time_parameters--specific_date--interval))
+- `threshold_value` (String) Date in yyyy-MM-dd (with year) or MM-dd (without year) format.
+
+<a id="nestedblock--campaign_rule_conditions--date_time_parameters--specific_date--interval"></a>
+### Nested Schema for `campaign_rule_conditions.date_time_parameters.specific_date.interval`
+
+Required:
+
+- `max` (String) Maximum date in yyyy-MM-dd or MM-dd format.
+- `min` (String) Minimum date in yyyy-MM-dd or MM-dd format.
+
+
+
+<a id="nestedblock--campaign_rule_conditions--date_time_parameters--time_of_day"></a>
+### Nested Schema for `campaign_rule_conditions.date_time_parameters.time_of_day`
+
+Optional:
+
+- `interval` (Block List, Max: 1) Time interval for "between" operator. (see [below for nested schema](#nestedblock--campaign_rule_conditions--date_time_parameters--time_of_day--interval))
+- `threshold_value` (String) Time in HH:mm:ss.SSS format.
+
+<a id="nestedblock--campaign_rule_conditions--date_time_parameters--time_of_day--interval"></a>
+### Nested Schema for `campaign_rule_conditions.date_time_parameters.time_of_day.interval`
+
+Required:
+
+- `max` (String) Maximum time in HH:mm:ss.SSS format.
+- `min` (String) Minimum time in HH:mm:ss.SSS format.
+
+
+
+<a id="nestedblock--campaign_rule_conditions--date_time_parameters--week_day_of_month"></a>
+### Nested Schema for `campaign_rule_conditions.date_time_parameters.week_day_of_month`
+
+Optional:
+
+- `interval` (Block List, Max: 1) Weekday-of-month interval for "between" operator. (see [below for nested schema](#nestedblock--campaign_rule_conditions--date_time_parameters--week_day_of_month--interval))
+- `threshold_value` (Block List, Max: 1) The weekday-of-month value for "equals"/"before"/"after" operators. (see [below for nested schema](#nestedblock--campaign_rule_conditions--date_time_parameters--week_day_of_month--threshold_value))
+
+<a id="nestedblock--campaign_rule_conditions--date_time_parameters--week_day_of_month--interval"></a>
+### Nested Schema for `campaign_rule_conditions.date_time_parameters.week_day_of_month.interval`
+
+Required:
+
+- `max` (Block List, Min: 1, Max: 1) Maximum weekday-of-month. (see [below for nested schema](#nestedblock--campaign_rule_conditions--date_time_parameters--week_day_of_month--interval--max))
+- `min` (Block List, Min: 1, Max: 1) Minimum weekday-of-month. (see [below for nested schema](#nestedblock--campaign_rule_conditions--date_time_parameters--week_day_of_month--interval--min))
+
+<a id="nestedblock--campaign_rule_conditions--date_time_parameters--week_day_of_month--interval--max"></a>
+### Nested Schema for `campaign_rule_conditions.date_time_parameters.week_day_of_month.interval.max`
+
+Required:
+
+- `day_of_week` (Number) Day of week (1=Monday, 7=Sunday).
+
+Optional:
+
+- `month` (Number) Month (1-12). Optional.
+- `occurrence` (Number) Occurrence (1-4, or -1 for last).
+
+
+<a id="nestedblock--campaign_rule_conditions--date_time_parameters--week_day_of_month--interval--min"></a>
+### Nested Schema for `campaign_rule_conditions.date_time_parameters.week_day_of_month.interval.min`
+
+Required:
+
+- `day_of_week` (Number) Day of week (1=Monday, 7=Sunday).
+
+Optional:
+
+- `month` (Number) Month (1-12). Optional.
+- `occurrence` (Number) Occurrence (1-4, or -1 for last).
+
+
+
+<a id="nestedblock--campaign_rule_conditions--date_time_parameters--week_day_of_month--threshold_value"></a>
+### Nested Schema for `campaign_rule_conditions.date_time_parameters.week_day_of_month.threshold_value`
+
+Required:
+
+- `day_of_week` (Number) Day of week (1=Monday, 7=Sunday).
+
+Optional:
+
+- `month` (Number) Month (1-12). Optional.
+- `occurrence` (Number) Occurrence (1-4, or -1 for last).
+
+
+
+
+
+<a id="nestedblock--condition_groups"></a>
+### Nested Schema for `condition_groups`
+
+Required:
+
+- `conditions` (Block List, Min: 1) The list of conditions in this group. (see [below for nested schema](#nestedblock--condition_groups--conditions))
+- `match_any_conditions` (Boolean) Whether or not this condition group should be evaluated as true if any of sub conditions is matched.
+
+<a id="nestedblock--condition_groups--conditions"></a>
+### Nested Schema for `condition_groups.conditions`
+
+Required:
+
+- `condition_type` (String) The type of condition to evaluate (campaignProgress | campaignAgents | campaignRecordsAttempted | campaignContactsMessaged | campaignBusinessSuccess | campaignBusinessNeutral | campaignBusinessFailure | campaignValidAttempts | campaignRightPartyContacts | timeOfDay | dayOfWeek | dayOfMonth | weekDayOfMonth | specificDate | campaignRunTime | campaignWaitTime)
+- `parameters` (Block Set, Min: 1) The parameters for the CampaignRuleCondition. (see [below for nested schema](#nestedblock--condition_groups--conditions--parameters))
+
+Optional:
+
+- `campaign_run_time_settings` (Block List, Max: 1) Settings for campaignRunTime conditions. Only valid with campaign_rule_processing = "v2" and condition_groups. (see [below for nested schema](#nestedblock--condition_groups--conditions--campaign_run_time_settings))
+- `campaign_wait_time_settings` (Block List, Max: 1) Settings for campaignWaitTime conditions. Only valid with campaign_rule_processing = "v2" and condition_groups. (see [below for nested schema](#nestedblock--condition_groups--conditions--campaign_wait_time_settings))
+- `date_time_parameters` (Block List, Max: 1) Parameters for date/time conditions (timeOfDay, dayOfWeek, dayOfMonth, specificDate, weekDayOfMonth). Only valid with campaign_rule_processing = "v2" and condition_groups. (see [below for nested schema](#nestedblock--condition_groups--conditions--date_time_parameters))
+- `id` (String) The ID of the CampaignRuleCondition.
+
+<a id="nestedblock--condition_groups--conditions--parameters"></a>
+### Nested Schema for `condition_groups.conditions.parameters`
+
+Optional:
+
+- `abandon_rate` (String) Compliance Abandon Rate. Required for 'setCampaignAbandonRate' action
+- `dialing_mode` (String) The dialing mode to set a campaign to. Required for the 'setCampaignDialingMode' action (agentless | preview | power | predictive | progressive | external).
+- `email_content_template_id` (String) The content template to set an Email campaign to.
+- `email_messages_per_minute` (String) The number of messages per minute to set an Email messaging campaign to.
+- `max_calls_per_agent` (String) Max calls per agent. Optional parameter for 'setCampaignMaxCallsPerAgent' action
+- `messages_per_minute` (String) The number of messages per minute to set a messaging campaign to.
+- `operator` (String) The operator for comparison. Required for a CampaignRuleCondition. Valid values: equals, greaterThan, greaterThanEqualTo, lessThan, lessThanEqualTo, before, after, between, in.
+- `outbound_line_count` (String) Number of Outbound lines. Required for 'setCampaignNumberOfLines' action
+- `priority` (String) The priority to set a campaign to (1 | 2 | 3 | 4 | 5). Required for the 'setCampaignPriority' action.
+- `queue_id` (String) The ID of the Queue. Required for 'changeCampaignQueue' action
+- `relative_weight` (String) Relative weight. Required for 'setCampaignWeight' action
+- `sms_content_template_id` (String) The content template to set a SMS campaign to.
+- `sms_messages_per_minute` (String) The number of messages per minute to set a SMS messaging campaign to.
+- `value` (String) The value for comparison. Required for a CampaignRuleCondition.
+
+
+<a id="nestedblock--condition_groups--conditions--campaign_run_time_settings"></a>
+### Nested Schema for `condition_groups.conditions.campaign_run_time_settings`
+
+Optional:
+
+- `include_waiting_time` (Boolean) When true, counts all campaign running time. When false, only counts time when campaign is not waiting. Defaults to `true`.
+
+
+<a id="nestedblock--condition_groups--conditions--campaign_wait_time_settings"></a>
+### Nested Schema for `condition_groups.conditions.campaign_wait_time_settings`
+
+Required:
+
+- `wait_type` (String) Campaign wait type (Agents | Contacts | Lines).
+
+
+<a id="nestedblock--condition_groups--conditions--date_time_parameters"></a>
+### Nested Schema for `condition_groups.conditions.date_time_parameters`
+
+Optional:
+
+- `day_of_month` (Block List, Max: 1) Parameters for dayOfMonth condition type. (see [below for nested schema](#nestedblock--condition_groups--conditions--date_time_parameters--day_of_month))
+- `day_of_week` (Block List, Max: 1) Parameters for dayOfWeek condition type. (see [below for nested schema](#nestedblock--condition_groups--conditions--date_time_parameters--day_of_week))
+- `inverted` (Boolean) If true, inverts the result of evaluating this condition. Defaults to `false`.
+- `specific_date` (Block List, Max: 1) Parameters for specificDate condition type. (see [below for nested schema](#nestedblock--condition_groups--conditions--date_time_parameters--specific_date))
+- `time_of_day` (Block List, Max: 1) Parameters for timeOfDay condition type. (see [below for nested schema](#nestedblock--condition_groups--conditions--date_time_parameters--time_of_day))
+- `week_day_of_month` (Block List, Max: 1) Parameters for weekDayOfMonth condition type. (see [below for nested schema](#nestedblock--condition_groups--conditions--date_time_parameters--week_day_of_month))
+
+<a id="nestedblock--condition_groups--conditions--date_time_parameters--day_of_month"></a>
+### Nested Schema for `condition_groups.conditions.date_time_parameters.day_of_month`
+
+Optional:
+
+- `in_set` (List of String) Days of month (1-31, "LAST_DAY", "EVEN_DAY", "ODD_DAY") for "equals"/"in" operators.
+- `interval` (Block List, Max: 1) Day interval for "between" operator. (see [below for nested schema](#nestedblock--condition_groups--conditions--date_time_parameters--day_of_month--interval))
+- `threshold_value` (String) Day of month (1-31 or "LAST_DAY") for "before"/"after" operators.
+
+<a id="nestedblock--condition_groups--conditions--date_time_parameters--day_of_month--interval"></a>
+### Nested Schema for `condition_groups.conditions.date_time_parameters.day_of_month.interval`
+
+Required:
+
+- `max` (String) Maximum day (1-31 or "LAST_DAY").
+- `min` (String) Minimum day (1-31).
+
+
+
+<a id="nestedblock--condition_groups--conditions--date_time_parameters--day_of_week"></a>
+### Nested Schema for `condition_groups.conditions.date_time_parameters.day_of_week`
+
+Optional:
+
+- `in_set` (List of Number) Days of week (1=Monday, 7=Sunday) for "equals"/"in" operators.
+- `interval` (Block List, Max: 1) Day interval for "between" operator. (see [below for nested schema](#nestedblock--condition_groups--conditions--date_time_parameters--day_of_week--interval))
+
+<a id="nestedblock--condition_groups--conditions--date_time_parameters--day_of_week--interval"></a>
+### Nested Schema for `condition_groups.conditions.date_time_parameters.day_of_week.interval`
+
+Required:
+
+- `max` (Number) Maximum day (1-7).
+- `min` (Number) Minimum day (1-7).
+
+
+
+<a id="nestedblock--condition_groups--conditions--date_time_parameters--specific_date"></a>
+### Nested Schema for `condition_groups.conditions.date_time_parameters.specific_date`
+
+Optional:
+
+- `include_year` (Boolean) If true, includes year in date comparison. Defaults to `true`.
+- `interval` (Block List, Max: 1) Date interval for "between" operator. (see [below for nested schema](#nestedblock--condition_groups--conditions--date_time_parameters--specific_date--interval))
+- `threshold_value` (String) Date in yyyy-MM-dd (with year) or MM-dd (without year) format.
+
+<a id="nestedblock--condition_groups--conditions--date_time_parameters--specific_date--interval"></a>
+### Nested Schema for `condition_groups.conditions.date_time_parameters.specific_date.interval`
+
+Required:
+
+- `max` (String) Maximum date in yyyy-MM-dd or MM-dd format.
+- `min` (String) Minimum date in yyyy-MM-dd or MM-dd format.
+
+
+
+<a id="nestedblock--condition_groups--conditions--date_time_parameters--time_of_day"></a>
+### Nested Schema for `condition_groups.conditions.date_time_parameters.time_of_day`
+
+Optional:
+
+- `interval` (Block List, Max: 1) Time interval for "between" operator. (see [below for nested schema](#nestedblock--condition_groups--conditions--date_time_parameters--time_of_day--interval))
+- `threshold_value` (String) Time in HH:mm:ss.SSS format.
+
+<a id="nestedblock--condition_groups--conditions--date_time_parameters--time_of_day--interval"></a>
+### Nested Schema for `condition_groups.conditions.date_time_parameters.time_of_day.interval`
+
+Required:
+
+- `max` (String) Maximum time in HH:mm:ss.SSS format.
+- `min` (String) Minimum time in HH:mm:ss.SSS format.
+
+
+
+<a id="nestedblock--condition_groups--conditions--date_time_parameters--week_day_of_month"></a>
+### Nested Schema for `condition_groups.conditions.date_time_parameters.week_day_of_month`
+
+Optional:
+
+- `interval` (Block List, Max: 1) Weekday-of-month interval for "between" operator. (see [below for nested schema](#nestedblock--condition_groups--conditions--date_time_parameters--week_day_of_month--interval))
+- `threshold_value` (Block List, Max: 1) The weekday-of-month value for "equals"/"before"/"after" operators. (see [below for nested schema](#nestedblock--condition_groups--conditions--date_time_parameters--week_day_of_month--threshold_value))
+
+<a id="nestedblock--condition_groups--conditions--date_time_parameters--week_day_of_month--interval"></a>
+### Nested Schema for `condition_groups.conditions.date_time_parameters.week_day_of_month.interval`
+
+Required:
+
+- `max` (Block List, Min: 1, Max: 1) Maximum weekday-of-month. (see [below for nested schema](#nestedblock--condition_groups--conditions--date_time_parameters--week_day_of_month--interval--max))
+- `min` (Block List, Min: 1, Max: 1) Minimum weekday-of-month. (see [below for nested schema](#nestedblock--condition_groups--conditions--date_time_parameters--week_day_of_month--interval--min))
+
+<a id="nestedblock--condition_groups--conditions--date_time_parameters--week_day_of_month--interval--max"></a>
+### Nested Schema for `condition_groups.conditions.date_time_parameters.week_day_of_month.interval.max`
+
+Required:
+
+- `day_of_week` (Number) Day of week (1=Monday, 7=Sunday).
+
+Optional:
+
+- `month` (Number) Month (1-12). Optional.
+- `occurrence` (Number) Occurrence (1-4, or -1 for last).
+
+
+<a id="nestedblock--condition_groups--conditions--date_time_parameters--week_day_of_month--interval--min"></a>
+### Nested Schema for `condition_groups.conditions.date_time_parameters.week_day_of_month.interval.min`
+
+Required:
+
+- `day_of_week` (Number) Day of week (1=Monday, 7=Sunday).
+
+Optional:
+
+- `month` (Number) Month (1-12). Optional.
+- `occurrence` (Number) Occurrence (1-4, or -1 for last).
+
+
+
+<a id="nestedblock--condition_groups--conditions--date_time_parameters--week_day_of_month--threshold_value"></a>
+### Nested Schema for `condition_groups.conditions.date_time_parameters.week_day_of_month.threshold_value`
+
+Required:
+
+- `day_of_week` (Number) Day of week (1=Monday, 7=Sunday).
+
+Optional:
+
+- `month` (Number) Month (1-12). Optional.
+- `occurrence` (Number) Occurrence (1-4, or -1 for last).
+
+
+
+
+
+
+<a id="nestedblock--execution_settings"></a>
+### Nested Schema for `execution_settings`
+
+Required:
+
+- `frequency` (String) Execution control frequency. Valid values: onEachTrigger, oncePerDay.
+
+Optional:
+
+- `time_zone_id` (String) The time zone for the execution control frequency="oncePerDay"; for example, Africa/Abidjan. This property is ignored when frequency is not "oncePerDay".
 

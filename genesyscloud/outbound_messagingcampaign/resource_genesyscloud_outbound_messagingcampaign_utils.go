@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/provider"
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/util"
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/util/resourcedata"
@@ -439,10 +439,19 @@ func CreateRoutingSmsPhoneNumber(inputSmsPhoneNumber string, api *platformclient
 		maxRetries      = 10
 	)
 	_, resp, err := api.GetRoutingSmsPhonenumber(inputSmsPhoneNumber, "compliance")
-	if resp.StatusCode == 200 {
+	if err != nil {
+		if resp == nil {
+			return fmt.Errorf("error retrieving SMS phone number %s (nil response): %v", inputSmsPhoneNumber, err)
+		}
+		if resp.StatusCode != http.StatusNotFound {
+			return fmt.Errorf("error retrieving SMS phone number %s (status code %d): %v", inputSmsPhoneNumber, resp.StatusCode, err)
+		}
+	} else if resp != nil && resp.StatusCode == http.StatusOK {
 		// Number already exists
 		return nil
-	} else if resp.StatusCode == http.StatusNotFound {
+	}
+
+	if resp != nil && resp.StatusCode == http.StatusNotFound {
 		body := platformclientv2.Smsphonenumberprovision{
 			PhoneNumber:     &inputSmsPhoneNumber,
 			PhoneNumberType: &phoneNumberType,
@@ -493,7 +502,7 @@ func CheckOutboundDomainExists(id string) error {
 		return nil
 	}
 
-	if resp.StatusCode == 404 {
+	if resp.StatusCode == http.StatusNotFound {
 		// outbound domain for test does not exist so create it
 		log.Printf("Outbound domain (%s) does not exist. Creating...", id)
 		_, _, postErr := routingApi.PostRoutingEmailOutboundDomains(platformclientv2.Outbounddomaincreaterequest{

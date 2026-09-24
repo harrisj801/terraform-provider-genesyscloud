@@ -1,6 +1,7 @@
 package resource_exporter
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,8 +11,43 @@ import (
 
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/util/constants"
 
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 )
+
+// SpeechAndTextAnalyticsTopicIdResolver resolves an STT topic GUID into a data source reference.
+// It queries GET /api/v2/speechandtextanalytics/topics/{topicId} to retrieve name + dialect and emits:
+//
+//	data "genesyscloud_speechandtextanalytics_topic" "<name>_<dialect>" { name = "...", dialect = "..." }
+//
+// and updates the referencing field to use data source ID.
+func SpeechAndTextAnalyticsTopicIdResolver(configMap map[string]interface{}, value any, sdkConfig *platformclientv2.Configuration) (dsType string, dsID string, dsConfig map[string]interface{}, resolve bool) {
+	topicId, _ := value.(string)
+	if !isValidGuid(topicId) {
+		return "", "", nil, false
+	}
+
+	api := platformclientv2.NewSpeechTextAnalyticsApiWithConfig(sdkConfig)
+	topic, _, err := api.GetSpeechandtextanalyticsTopic(topicId)
+	if err != nil || topic == nil || topic.Name == nil || topic.Dialect == nil {
+		// If we can't resolve, keep the raw GUID instead of failing export.
+		log.Printf("failed to resolve speech and text analytics topic %s: %v", topicId, err)
+		return "", "", nil, false
+	}
+
+	name := strings.TrimSpace(*topic.Name)
+	dialect := strings.TrimSpace(*topic.Dialect)
+	if name == "" || dialect == "" {
+		return "", "", nil, false
+	}
+
+	label := strings.ReplaceAll(fmt.Sprintf("%s_%s", name, dialect), " ", "_")
+	ds := map[string]interface{}{
+		"name":    name,
+		"dialect": dialect,
+	}
+
+	return "genesyscloud_speechandtextanalytics_topic", label, ds, true
+}
 
 /*
 OutboundCampaignAgentScriptResolver
@@ -67,6 +103,36 @@ func isValidGuid(id string) bool {
 		return false
 	}
 	return matched
+}
+
+// OmitUnresolvedRefResolver marks an attribute for omission when export_omit_unresolved_refs is enabled
+// and the attribute value could not be resolved to a Terraform reference.
+func OmitUnresolvedRefResolver() *RefAttrCustomResolver {
+	return &RefAttrCustomResolver{
+		OmitUnresolvedRef: true,
+	}
+}
+
+// OmitUnresolvedGuidFromConfigMap removes an attribute value that could not be resolved to a Terraform reference.
+// Optional reference attributes that still contain a raw GUID after export resolution are omitted from the config.
+func OmitUnresolvedGuidFromConfigMap(configMap map[string]interface{}, attributeKey string) {
+	val, ok := configMap[attributeKey]
+	if !ok {
+		return
+	}
+
+	strVal, ok := val.(string)
+	if !ok || strVal == "" {
+		return
+	}
+
+	if strings.HasPrefix(strVal, "${") {
+		return
+	}
+
+	if isValidGuid(strVal) {
+		delete(configMap, attributeKey)
+	}
 }
 
 // MemberGroupsResolver resolves the resource type to use for member_group_id based on member_group_type.
@@ -183,6 +249,7 @@ func ReplyEmailAddressSelfReferenceRouteExporterResolver(configMap map[string]in
 	if routeId == currentRouteReference {
 		configMap["self_reference_route"] = true
 		configMap["route_id"] = nil
+		configMap["domain_id"] = nil
 	}
 	return nil
 }
@@ -192,6 +259,18 @@ func ConditionValueResolver(configMap map[string]interface{}, exporters map[stri
 		configMap["condition_value"] = 0
 	}
 
+	return nil
+}
+
+// RemoveLabelIdsResolver removes the label_ids field after RefAttr resolution has processed it.
+func RemoveLabelIdsResolver(configMap map[string]interface{}, exporters map[string]*ResourceExporter, resourceLabel string) error {
+	configMap["label_ids"] = nil
+	return nil
+}
+
+// RemoveCategoryIdResolver removes the category_id field after RefAttr resolution has processed it.
+func RemoveCategoryIdResolver(configMap map[string]interface{}, exporters map[string]*ResourceExporter, resourceLabel string) error {
+	configMap["category_id"] = nil
 	return nil
 }
 
@@ -217,9 +296,26 @@ func KnowledgeDocumentLabelNamesResolver(configMap map[string]interface{}, expor
 		return nil
 	}
 
+	// Try to get the label exporter from the passed exporters map first,
+	// then fall back to the global registry if not found
 	exporter, ok := exporters["genesyscloud_knowledge_label"]
-	if !ok {
-		return nil
+	if !ok || exporter == nil {
+		allExporters := GetResourceExporters()
+		exporter, ok = allExporters["genesyscloud_knowledge_label"]
+		if !ok || exporter == nil {
+			return nil
+		}
+		// Add the exporter to the exporters map so the framework can export its resources
+		exporters["genesyscloud_knowledge_label"] = exporter
+	}
+
+	// If the label exporter hasn't been loaded yet (dependency resolution scenario),
+	// load it now so we can resolve label names to references
+	if exporter.GetSanitizedResourceMapSize() == 0 {
+		ctx := context.Background()
+		if diagErr := exporter.LoadSanitizedResourceMap(ctx, "genesyscloud_knowledge_label", nil); diagErr != nil {
+			return fmt.Errorf("failed to load knowledge label resources: %v", diagErr)
+		}
 	}
 
 	resolvedNames := make([]string, 0, len(labelNames))
@@ -230,9 +326,6 @@ func KnowledgeDocumentLabelNamesResolver(configMap map[string]interface{}, expor
 		}
 
 		for _, labelResource := range exporter.SanitizedResourceMap {
-
-			// OriginalLabel preserves the original format (with spaces) which matches the labelName format
-			// whereas BlockLabel is sanitized
 			if strings.HasSuffix(labelResource.OriginalLabel, "_"+name) {
 				resolvedNames = append(resolvedNames, fmt.Sprintf("${genesyscloud_knowledge_label.%s.knowledge_label[0].name}", labelResource.BlockLabel))
 				break
@@ -242,6 +335,47 @@ func KnowledgeDocumentLabelNamesResolver(configMap map[string]interface{}, expor
 
 	if len(resolvedNames) > 0 {
 		configMap["label_names"] = resolvedNames
+	}
+
+	return nil
+}
+
+// KnowledgeDocumentCategoryNameResolver resolves the category_name to a reference to the knowledge category resource's name
+// instead of the category name as a string. This is so that the correct creation order is always applied as otherwise knowledge_documents
+// could be created without the category set, which makes the consistency checker fail.
+func KnowledgeDocumentCategoryNameResolver(configMap map[string]interface{}, exporters map[string]*ResourceExporter, resourceLabel string) error {
+	categoryName, ok := configMap["category_name"].(string)
+	if !ok || categoryName == "" {
+		return nil
+	}
+
+	// Try to get the category exporter from the passed exporters map first,
+	// then fall back to the global registry if not found
+	exporter, ok := exporters["genesyscloud_knowledge_category"]
+	if !ok || exporter == nil {
+		allExporters := GetResourceExporters()
+		exporter, ok = allExporters["genesyscloud_knowledge_category"]
+		if !ok || exporter == nil {
+			return nil
+		}
+		// Add the exporter to the exporters map so the framework can export its resources
+		exporters["genesyscloud_knowledge_category"] = exporter
+	}
+
+	// If the category exporter hasn't been loaded yet (dependency resolution scenario),
+	// load it now so we can resolve category names to references
+	if exporter.GetSanitizedResourceMapSize() == 0 {
+		ctx := context.Background()
+		if diagErr := exporter.LoadSanitizedResourceMap(ctx, "genesyscloud_knowledge_category", nil); diagErr != nil {
+			return fmt.Errorf("failed to load knowledge category resources: %v", diagErr)
+		}
+	}
+
+	for _, categoryResource := range exporter.SanitizedResourceMap {
+		if strings.HasSuffix(categoryResource.OriginalLabel, "_"+categoryName) {
+			configMap["category_name"] = fmt.Sprintf("${genesyscloud_knowledge_category.%s.knowledge_category[0].name}", categoryResource.BlockLabel)
+			break
+		}
 	}
 
 	return nil

@@ -2,6 +2,7 @@ package business_rules_decision_table
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -9,12 +10,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/retry"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	platformclientv2 "github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	platformclientv2 "github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/consistency_checker"
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/provider"
 	resourceExporter "github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/resource_exporter"
+	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/tfexporter_state"
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/util"
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/util/constants"
+	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/util/files"
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/util/resourcedata"
 )
 
@@ -81,32 +84,74 @@ func createBusinessRulesDecisionTable(ctx context.Context, d *schema.ResourceDat
 
 	log.Printf("Successfully created business rules decision table with ID: %s", tableId)
 
-	// Add rows (required)
-	rows, ok := d.Get("rows").([]interface{})
-	if !ok {
-		return util.BuildAPIDiagnosticError(ResourceType, "rows is not a []interface{}", nil)
-	}
-	if len(rows) == 0 {
-		return util.BuildAPIDiagnosticError(ResourceType, "At least one row is required", nil)
-	}
-	log.Printf("Adding %d rows to decision table %s version %d", len(rows), tableId, tableVersion)
-	err = addRowsToVersion(ctx, proxy, tableId, tableVersion, rows)
-	if err != nil {
-		proxy.deleteBusinessRulesDecisionTable(ctx, tableId)
-		return util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to add rows: %s", err), nil)
-	}
-	log.Printf("Successfully added %d rows to decision table %s version %d", len(rows), tableId, tableVersion)
+	csvPath, _ := d.Get("rows_csv_filepath").(string)
+	if csvPath != "" {
+		// Import Replace writes a new draft version; publish it like the nested-rows path.
+		log.Printf("Importing rows from CSV into decision table %s", tableId)
+		if err := importDecisionTableRowsFromCSV(ctx, d, proxy, tableId, false); err != nil {
+			rollbackErr := rollbackDecisionTable(tableId, proxy)
+			rollbackSuffix := ""
+			if rollbackErr != nil {
+				rollbackSuffix = fmt.Sprintf("; additionally, cleanup of table %s failed - manual deletion may be required: %s", tableId, rollbackErr)
+			}
+			return util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to import rows from CSV: %s%s", err, rollbackSuffix), nil)
+		}
+	} else {
+		rows, ok := d.Get("rows").([]interface{})
+		if !ok {
+			return util.BuildAPIDiagnosticError(ResourceType, "rows is not a []interface{}", nil)
+		}
+		if len(rows) == 0 {
+			return util.BuildAPIDiagnosticError(ResourceType, "At least one row is required", nil)
+		}
+		log.Printf("Adding %d rows to decision table %s version %d", len(rows), tableId, tableVersion)
+		err = addRowsToVersion(ctx, proxy, tableId, tableVersion, rows)
+		if err != nil {
+			rollbackErr := rollbackDecisionTable(tableId, proxy)
+			rollbackSuffix := ""
+			if rollbackErr != nil {
+				rollbackSuffix = fmt.Sprintf("; additionally, cleanup of table %s failed - manual deletion may be required: %s", tableId, rollbackErr)
+			}
+			if errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+				return util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf(
+					"create of decision table %s timed out after %s while adding %d rows (one POST per row); "+
+						"the partially-created table has been rolled back (deleted). Increase the create timeout in the "+
+						"resource's Terraform timeouts block (e.g. timeouts { create = \"180m\" }) and re-apply: %s%s",
+					tableId, d.Timeout(schema.TimeoutCreate), len(rows), err, rollbackSuffix), nil)
+			}
+			return util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to add rows: %s%s", err, rollbackSuffix), nil)
+		}
+		log.Printf("Successfully added %d rows to decision table %s version %d", len(rows), tableId, tableVersion)
 
-	// Publish the version
-	if err := publishDecisionTableVersion(ctx, proxy, tableId, tableVersion); err != nil {
-		proxy.deleteBusinessRulesDecisionTable(ctx, tableId)
-		return util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to publish version: %s", err), nil)
+		if err := publishDecisionTableVersion(ctx, proxy, tableId, tableVersion); err != nil {
+			rollbackErr := rollbackDecisionTable(tableId, proxy)
+			msg := fmt.Sprintf("Failed to publish version: %s", err)
+			if rollbackErr != nil {
+				msg += fmt.Sprintf("; additionally, cleanup of table %s failed - manual deletion may be required: %s", tableId, rollbackErr)
+			}
+			return util.BuildAPIDiagnosticError(ResourceType, msg, nil)
+		}
+		log.Printf("Successfully published decision table %s version %d", tableId, tableVersion)
 	}
-	log.Printf("Successfully published decision table %s version %d", tableId, tableVersion)
 
 	d.SetId(tableId)
 	log.Printf("Created business rules decision table %s", tableId)
 	return readBusinessRulesDecisionTable(ctx, d, meta)
+}
+
+// rollbackDecisionTable deletes a partially-created decision table on a fresh,
+// detached context. The create request context may already be expired/cancelled
+// (e.g. on a create timeout), which would prevent the cleanup DELETE from being
+// sent and leave the table orphaned in the org.
+func rollbackDecisionTable(tableId string, proxy *BusinessRulesDecisionTableProxy) error {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if _, derr := proxy.deleteBusinessRulesDecisionTable(cleanupCtx, tableId); derr != nil {
+		log.Printf("[WARN] rollback delete failed for decision table %s: %s", tableId, derr)
+		return derr
+	}
+	log.Printf("Rolled back (deleted) partially-created decision table %s", tableId)
+	return nil
 }
 
 // readBusinessRulesDecisionTable reads a Genesys Cloud business rules decision table
@@ -118,7 +163,7 @@ func readBusinessRulesDecisionTable(ctx context.Context, d *schema.ResourceData,
 	tableId := d.Id()
 	log.Printf("Reading business rules decision table %s", tableId)
 
-	return util.WithRetriesForReadCustomTimeout(ctx, 1*time.Minute, d, func() *retry.RetryError {
+	return util.WithRetriesForReadCustomTimeout(ctx, d.Timeout(schema.TimeoutRead), d, func() *retry.RetryError {
 
 		// Get table details to find the published version and table metadata
 		table, resp, err := proxy.getBusinessRulesDecisionTable(ctx, tableId)
@@ -149,7 +194,9 @@ func readBusinessRulesDecisionTable(ctx context.Context, d *schema.ResourceData,
 
 		// Set name and description from the table (version endpoint doesn't provide these)
 		resourcedata.SetNillableValue(d, "name", table.Name)
-		resourcedata.SetNillableValue(d, "description", table.Description)
+		// Preserve null for an absent description; SetNillableValue would coerce it
+		// to "" for a TypeString and cause a null -> "" plan inconsistency.
+		resourcedata.SetStringValueIfNotNil(d, "description", table.Description)
 		resourcedata.SetNillableReferenceDivision(d, "division_id", tableVersion.Division)
 		resourcedata.SetNillableValue(d, "version", &versionToRead)
 
@@ -165,6 +212,21 @@ func readBusinessRulesDecisionTable(ctx context.Context, d *schema.ResourceData,
 		log.Printf("Flattening columns for decision table %s version %d", tableId, versionToRead)
 		columns := flattenColumns(tableVersion.Columns)
 		d.Set("columns", []interface{}{columns})
+
+		csvPath, _ := d.Get("rows_csv_filepath").(string)
+		if csvPath != "" {
+			// CSV mode: no row paging. Clear nested rows so rows→CSV migrate does not leave stale rows in state.
+			_ = d.Set("rows", nil)
+			log.Printf("Read business rules decision table %s version %d (CSV mode, skip row fetch)", tableId, versionToRead)
+			return cc.CheckState(d)
+		}
+		if tfexporter_state.IsExporterActive() {
+			// tf_export: CustomFileWriter writes Populated CSV. Skip row paging but do not clear
+			// nested rows — wiping them corrupts state of still-managed nested-rows resources
+			// in the same apply (non-empty plan after refresh).
+			log.Printf("Read business rules decision table %s version %d (export mode, skip row fetch)", tableId, versionToRead)
+			return cc.CheckState(d)
+		}
 
 		// Get stored column order from state
 		var storedInputOrder []string
@@ -211,26 +273,20 @@ func addRowsToVersion(ctx context.Context, proxy *BusinessRulesDecisionTableProx
 	// Get column IDs in order for column order mapping
 	inputColumnIds, outputColumnIds := extractColumnOrder(tableVersion.Columns)
 
-	// Convert and add each row individually using column order mapping
+	sdkRows := make([]platformclientv2.Createdecisiontablerowrequest, 0, len(terraformRows))
 	for i, row := range terraformRows {
 		rowMap := row.(map[string]interface{})
 
-		// Convert row from Terraform to SDK format using column order mapping
 		sdkRow, err := convertDecisionTableRowFromProviderToSDK(rowMap, inputColumnIds, outputColumnIds)
 		if err != nil {
 			return fmt.Errorf("failed to convert row %d (table %s, version %d): %s", i+1, tableId, version, err)
 		}
-
-		// Add the row to the version
-		_, err = proxy.createDecisionTableRow(ctx, tableId, version, &sdkRow)
-		if err != nil {
-			return fmt.Errorf("failed to add row %d: %s", i+1, err)
-		}
-
-		log.Printf("Successfully added row %d to decision table %s version %d", i+1, tableId, version)
+		sdkRow.RowIndex = nil
+		sdkRows = append(sdkRows, sdkRow)
 	}
 
-	return nil
+	limAdd, _, _ := getBulkChunkLimits()
+	return bulkAddConvertedRows(ctx, proxy, tableId, version, sdkRows, limAdd, 0)
 }
 
 // publishDecisionTableVersion publishes a decision table version
@@ -250,45 +306,55 @@ func publishDecisionTableVersion(ctx context.Context, proxy *BusinessRulesDecisi
 	return nil
 }
 
-// getDecisionTableRows retrieves all rows from a specific decision table version
+// getDecisionTableRows retrieves all rows from a specific decision table version.
+// Page 1 is fetched on the caller's proxy; pages 2–N use provider.FetchPagesConcurrently
+// (sequential when max_concurrent_pages is 1, the default).
 func getDecisionTableRows(ctx context.Context, proxy *BusinessRulesDecisionTableProxy, tableVersion *platformclientv2.Decisiontableversion) ([]interface{}, error) {
-	// Extract tableId and version from tableVersion
 	tableId := *tableVersion.Id
 	version := *tableVersion.Version
-
-	var allRows []platformclientv2.Decisiontablerow
 	const pageSize = 100
-	pageNum := 1
+	pageSizeStr := fmt.Sprintf("%d", pageSize)
 
-	for {
-		rowListing, _, err := proxy.getDecisionTableRows(ctx, tableId, version, fmt.Sprintf("%d", pageNum), fmt.Sprintf("%d", pageSize))
-		if err != nil {
-			return nil, fmt.Errorf("failed to get rows for version %d page %d: %s", version, pageNum, err)
-		}
+	ctx = provider.EnsureResourceContext(ctx, ResourceType)
 
-		if rowListing == nil || rowListing.Entities == nil || len(*rowListing.Entities) == 0 {
-			break
-		}
-
-		allRows = append(allRows, *rowListing.Entities...)
-
-		// Check if there are more pages
-		if rowListing.PageCount == nil || pageNum >= *rowListing.PageCount {
-			break
-		}
-		pageNum++
+	first, resp, err := proxy.getDecisionTableRows(ctx, tableId, version, "1", pageSizeStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get rows for version %d page 1: %s", version, err)
+	}
+	if first == nil || first.Entities == nil || len(*first.Entities) == 0 {
+		return []interface{}{}, nil
 	}
 
-	// Get column IDs in order for column order mapping
-	inputColumnIds, outputColumnIds := extractColumnOrder(tableVersion.Columns)
+	allRows := append([]platformclientv2.Decisiontablerow{}, *first.Entities...)
 
-	// Convert SDK rows to Terraform format using column order mapping
+	totalPages := 1
+	if first.PageCount != nil {
+		totalPages = *first.PageCount
+	}
+
+	allRows, _, err = provider.FetchPagesConcurrently(ctx, ResourceType, allRows, resp, totalPages, proxy.clientConfig,
+		func(ctx context.Context, clientConfig *platformclientv2.Configuration, pageNum int) ([]platformclientv2.Decisiontablerow, *platformclientv2.APIResponse, error) {
+			ctx = provider.EnsureResourceContext(ctx, ResourceType)
+			pageProxy := newBusinessRulesDecisionTableProxy(clientConfig)
+			pageList, pageResp, pageErr := pageProxy.getDecisionTableRows(ctx, tableId, version, fmt.Sprintf("%d", pageNum), pageSizeStr)
+			if pageErr != nil {
+				return nil, pageResp, fmt.Errorf("failed to get rows for version %d page %d: %w", version, pageNum, pageErr)
+			}
+			if pageList == nil || pageList.Entities == nil || len(*pageList.Entities) == 0 {
+				return []platformclientv2.Decisiontablerow{}, pageResp, nil
+			}
+			return *pageList.Entities, pageResp, nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	inputColumnIds, outputColumnIds := extractColumnOrder(tableVersion.Columns)
 	terraformRows := make([]interface{}, len(allRows))
 	for i, row := range allRows {
-		// For now, use a simple conversion that includes all columns
 		terraformRows[i] = convertSDKRowToProvider(row, inputColumnIds, outputColumnIds)
 	}
-
 	return terraformRows, nil
 }
 
@@ -315,8 +381,9 @@ func updateBusinessRulesDecisionTable(ctx context.Context, d *schema.ResourceDat
 		log.Printf("Successfully updated name/description for decision table %s", tableId)
 	}
 
-	// Check if rows have changed
-	if d.HasChange("rows") {
+	// Nested rows update (deprecated). Skip when switching to / using CSV — Replace import owns rows.
+	csvPath, _ := d.Get("rows_csv_filepath").(string)
+	if d.HasChange("rows") && csvPath == "" {
 		log.Printf("Rows have changed for decision table %s", tableId)
 
 		// Get old and new row data
@@ -336,6 +403,28 @@ func updateBusinessRulesDecisionTable(ctx context.Context, d *schema.ResourceDat
 			return util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to update rows for decision table %s: %s", tableId, err), nil)
 		}
 		log.Printf("Successfully updated rows for decision table %s", tableId)
+	}
+
+	// CSV path: Replace-import when on-disk content (or path) differs from state.
+	// Compare file hash to prior state via GetChange — not Get (can be empty/unknown mid-apply)
+	// and not HasChange(hash) alone (ComputedIf can mark hash unknown without a real content change).
+	if csvPath != "" {
+		newHash, err := files.HashFileContent(ctx, csvPath, S3Enabled)
+		if err != nil {
+			return util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("failed to hash rows CSV for decision table %s: %s", tableId, err), nil)
+		}
+		oldHashI, _ := d.GetChange("rows_csv_content_hash")
+		oldHash, _ := oldHashI.(string)
+		if d.HasChange("rows_csv_filepath") || oldHash != newHash {
+			log.Printf("Importing updated rows CSV for decision table %s", tableId)
+			if err := importDecisionTableRowsFromCSV(ctx, d, proxy, tableId, true); err != nil {
+				return util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to import rows from CSV for decision table %s: %s", tableId, err), nil)
+			}
+			log.Printf("Successfully imported rows CSV for decision table %s", tableId)
+		} else if d.HasChange("rows_csv_content_hash") {
+			// Spurious hash churn from ComputedIf — converge state without a platform import.
+			_ = d.Set("rows_csv_content_hash", newHash)
+		}
 	}
 
 	log.Printf("Successfully updated Business Rules Decision Table: %s", tableId)
@@ -435,7 +524,9 @@ func updateDecisionTableRows(ctx context.Context, proxy *BusinessRulesDecisionTa
 	log.Printf("Detected changes: %d adds, %d updates, %d deletes", len(changes.adds), len(changes.updates), len(changes.deletes))
 
 	// Step 4: Apply changes to the draft version
-	err = applyRowChanges(ctx, proxy, tableId, newVersionNumber, changes)
+	// kept rows (= existing rows minus deletes) precede appended adds; used by the bulk ghost-chunk guard.
+	priorRowCount := len(oldRows) - len(changes.deletes)
+	err = applyRowChanges(ctx, proxy, tableId, newVersionNumber, changes, priorRowCount, oldRows)
 	if err != nil {
 		return fmt.Errorf("failed to apply row changes: %s", err)
 	}

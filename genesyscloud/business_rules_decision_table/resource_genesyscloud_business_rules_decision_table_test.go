@@ -2,6 +2,8 @@ package business_rules_decision_table
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"testing"
 
@@ -11,17 +13,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 )
 
 func TestAccResourceBusinessRulesDecisionTableHappyPath(t *testing.T) {
 	t.Parallel()
-
-	enabled, businessRulesDecisionTableResp, queueResp := businessRulesDecisionTableFtIsEnabled()
-	if !enabled {
-		t.Skipf("Skipping test as required permissions are not configured, decision table: %s, queues: %s", businessRulesDecisionTableResp.Status, queueResp.Status)
-		return
-	}
 
 	var (
 		// Resource labels
@@ -359,12 +355,6 @@ func testVerifyBusinessRulesDecisionTablesDestroyed(state *terraform.State) erro
 func TestAccResourceBusinessRulesDecisionTableInvalidLiteralValues(t *testing.T) {
 	t.Parallel()
 
-	enabled, businessRulesDecisionTableResp, queueResp := businessRulesDecisionTableFtIsEnabled()
-	if !enabled {
-		t.Skipf("Skipping test as required permissions are not configured, decision table: %s, queues: %s", businessRulesDecisionTableResp.Status, queueResp.Status)
-		return
-	}
-
 	var (
 		schemaResourceLabel = "test-schema"
 		schemaName          = "tf_schema_" + uuid.NewString()[:8]
@@ -480,12 +470,6 @@ func TestAccResourceBusinessRulesDecisionTableInvalidLiteralValues(t *testing.T)
 func TestAccResourceBusinessRulesDecisionTableRequiredFieldsValidation(t *testing.T) {
 	t.Parallel()
 
-	enabled, businessRulesDecisionTableResp, queueResp := businessRulesDecisionTableFtIsEnabled()
-	if !enabled {
-		t.Skipf("Skipping test as required permissions are not configured, decision table: %s, queues: %s", businessRulesDecisionTableResp.Status, queueResp.Status)
-		return
-	}
-
 	var (
 		schemaResourceLabel = "test-schema"
 		schemaName          = "tf_schema_" + uuid.NewString()[:8]
@@ -552,12 +536,6 @@ func TestAccResourceBusinessRulesDecisionTableRequiredFieldsValidation(t *testin
 
 func TestAccResourceBusinessRulesDecisionTableInvalidColumnReferences(t *testing.T) {
 	t.Parallel()
-
-	enabled, businessRulesDecisionTableResp, queueResp := businessRulesDecisionTableFtIsEnabled()
-	if !enabled {
-		t.Skipf("Skipping test as required permissions are not configured, decision table: %s, queues: %s", businessRulesDecisionTableResp.Status, queueResp.Status)
-		return
-	}
 
 	var (
 		schemaResourceLabel = "test-schema"
@@ -664,4 +642,336 @@ func generateColumnsWithInvalidPropertyKey(queueResourceLabel string) string {
 
 func generateHomeDivisionReference() string {
 	return "\ndata \"genesyscloud_auth_division_home\" \"home\" {}\n"
+}
+
+// TestAccResourceBusinessRulesDecisionTableWhitespaceEdgeCases replicates the customer issue
+// from RULES-1491: whitespace differences between .tf config and API response cause false
+// state mismatches and unnecessary updates on every terraform plan/apply.
+//
+// The customer scenario: table exists with clean values, user updates .tf from a spreadsheet
+// which introduces trailing spaces and spaces after commas. Terraform sees a diff and forces
+// an unnecessary update even though the data is semantically identical.
+//
+// This test:
+//   - Step 1: Create with clean values (no whitespace)
+//   - Step 2: Re-apply with whitespace-padded values — should produce NO plan changes (the bug)
+//   - Step 3: Real content change — verify actual updates still trigger
+//   - Step 4: Re-apply Step 3 config with whitespace added — should produce NO plan changes
+//
+// BEFORE FIX: Steps 2 and 4 FAIL — Terraform detects non-empty plan from whitespace diffs
+// AFTER FIX: All steps PASS — DiffSuppressFunc normalizes whitespace
+func TestAccResourceBusinessRulesDecisionTableWhitespaceEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	var (
+		tableResourceLabel  = "test-whitespace-dt"
+		schemaResourceLabel = "test-whitespace-schema"
+		queueResourceLabel  = "test-whitespace-queue"
+
+		tableName         = "TF Whitespace Test-" + uuid.NewString()[:8]
+		tableDesc         = "Terraform whitespace edge case test"
+		schemaName        = "TF Whitespace Schema-" + uuid.NewString()[:8]
+		schemaDescription = "Test schema for whitespace edge cases"
+		queueName         = "TF Whitespace Queue-" + uuid.NewString()[:8]
+	)
+
+	baseConfig := generateBusinessRulesSchemaResource(schemaResourceLabel, schemaName, schemaDescription) +
+		generateHomeDivisionReference() +
+		generateRoutingQueueResource(queueResourceLabel, queueName)
+
+	// Step 1: Clean values — guaranteed to work with the API
+	cleanConfig := baseConfig +
+		generateBusinessRulesDecisionTableResource(
+			tableResourceLabel, tableName, tableDesc,
+			"data.genesyscloud_auth_division_home.home.id",
+			"genesyscloud_business_rules_schema."+schemaResourceLabel+".id",
+			generateColumns(queueResourceLabel),
+			generateRows(queueResourceLabel),
+		)
+
+	// Step 2: Same data but with whitespace padding — simulates spreadsheet import
+	whitespaceConfig := baseConfig +
+		generateBusinessRulesDecisionTableResource(
+			tableResourceLabel, tableName, tableDesc,
+			"data.genesyscloud_auth_division_home.home.id",
+			"genesyscloud_business_rules_schema."+schemaResourceLabel+".id",
+			generateColumns(queueResourceLabel),
+			generateRowsWithWhitespaceEdgeCases(queueResourceLabel),
+		)
+
+	// Step 3: Real content change — clean values
+	realChangeConfig := baseConfig +
+		generateBusinessRulesDecisionTableResource(
+			tableResourceLabel, tableName, tableDesc,
+			"data.genesyscloud_auth_division_home.home.id",
+			"genesyscloud_business_rules_schema."+schemaResourceLabel+".id",
+			generateColumns(queueResourceLabel),
+			generateRowsWithRealContentChange(queueResourceLabel),
+		)
+
+	// Step 4: Same as Step 3 but with whitespace padding — tests diff suppression after update
+	realChangeWithWhitespaceConfig := baseConfig +
+		generateBusinessRulesDecisionTableResource(
+			tableResourceLabel, tableName, tableDesc,
+			"data.genesyscloud_auth_division_home.home.id",
+			"genesyscloud_business_rules_schema."+schemaResourceLabel+".id",
+			generateColumns(queueResourceLabel),
+			generateRowsWithRealContentChangeAndWhitespace(queueResourceLabel),
+		)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { util.TestAccPreCheck(t) },
+		ProviderFactories: provider.GetProviderFactories(providerResources, providerDataSources),
+		Steps: []resource.TestStep{
+			{
+				// Step 1: Create with clean values
+				Config: cleanConfig,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("genesyscloud_business_rules_decision_table."+tableResourceLabel, "name", tableName),
+					resource.TestCheckResourceAttr("genesyscloud_business_rules_decision_table."+tableResourceLabel, "rows.#", "1"),
+					resource.TestCheckResourceAttr("genesyscloud_business_rules_decision_table."+tableResourceLabel, "rows.0.inputs.1.literal.0.value", "John Doe"),
+					resource.TestCheckResourceAttr("genesyscloud_business_rules_decision_table."+tableResourceLabel, "rows.0.outputs.1.literal.0.value", "Premium Support"),
+				),
+			},
+			{
+				// Step 2: Re-apply with whitespace-padded values — should be NO plan changes
+				// BEFORE FIX: FAILS — Terraform sees "John Doe" vs "John Doe " as different
+				// AFTER FIX: PASSES — DiffSuppressFunc trims whitespace before comparison
+				Config:             whitespaceConfig,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
+			},
+			{
+				// Step 3: Real content change — verify actual updates still work
+				Config: realChangeConfig,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr("genesyscloud_business_rules_decision_table."+tableResourceLabel, "rows.0.inputs.1.literal.0.value", "Jane Smith"),
+					resource.TestCheckResourceAttr("genesyscloud_business_rules_decision_table."+tableResourceLabel, "rows.0.outputs.1.literal.0.value", "Standard Support"),
+				),
+			},
+			{
+				// Step 4: Re-apply Step 3 values with whitespace — should be NO plan changes
+				// Tests that diff suppression works after an update too, not just after create
+				// BEFORE FIX: FAILS
+				// AFTER FIX: PASSES
+				Config:             realChangeWithWhitespaceConfig,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
+			},
+		},
+		CheckDestroy: testVerifyBusinessRulesDecisionTablesDestroyed,
+	})
+}
+
+// TestAccResourceBusinessRulesDecisionTableMigrateRowsToCSV creates with nested rows, then
+// switches to rows_csv_filepath in place (same resource address). Ensures no recreate and
+// CSV import publishes a new version.
+func TestAccResourceBusinessRulesDecisionTableMigrateRowsToCSV(t *testing.T) {
+	t.Parallel()
+
+	var (
+		tableResourceLabel  = "test-dt-rows-to-csv"
+		schemaResourceLabel = "test-schema-rows-to-csv"
+		tableName           = "TF Test DT CSV Migrate-" + uuid.NewString()[:8]
+		tableDesc           = "Migrate nested rows to rows_csv_filepath"
+		schemaName          = "TF Test Schema CSV Migrate-" + uuid.NewString()[:8]
+		schemaDescription   = "Schema for rows→CSV migration ACC"
+		tableID             string
+	)
+
+	csvPath := filepath.Join(t.TempDir(), "migrate_rows.csv")
+	csvV1 := "customer_type::Equals,skill\nVIP,Premium Support\n"
+	csvV2 := "customer_type::Equals,skill\nVIP,Premium Support Updated\n"
+	if err := os.WriteFile(csvPath, []byte(csvV1), 0644); err != nil {
+		t.Fatal(err)
+	}
+	csvPathHCL := filepath.ToSlash(csvPath)
+
+	baseDeps := generateBusinessRulesSchemaResource(schemaResourceLabel, schemaName, schemaDescription) +
+		generateHomeDivisionReference()
+
+	nestedConfig := baseDeps + generateBusinessRulesDecisionTableResource(
+		tableResourceLabel,
+		tableName,
+		tableDesc,
+		"data.genesyscloud_auth_division_home.home.id",
+		"genesyscloud_business_rules_schema."+schemaResourceLabel+".id",
+		generateMinimalColumnsForCSVMigration(),
+		generateMinimalRowsForCSVMigration(),
+	)
+
+	csvConfig := baseDeps + generateBusinessRulesDecisionTableResourceCSV(
+		tableResourceLabel,
+		tableName,
+		tableDesc,
+		"data.genesyscloud_auth_division_home.home.id",
+		"genesyscloud_business_rules_schema."+schemaResourceLabel+".id",
+		generateMinimalColumnsForCSVMigration(),
+		csvPathHCL,
+	)
+
+	resourceAddr := "genesyscloud_business_rules_decision_table." + tableResourceLabel
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { util.TestAccPreCheck(t) },
+		ProviderFactories: provider.GetProviderFactories(providerResources, providerDataSources),
+		Steps: []resource.TestStep{
+			{
+				Config: nestedConfig,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceAddr, "name", tableName),
+					resource.TestCheckResourceAttr(resourceAddr, "version", "1"),
+					resource.TestCheckResourceAttr(resourceAddr, "rows.#", "1"),
+					resource.TestCheckResourceAttrSet(resourceAddr, "id"),
+					func(s *terraform.State) error {
+						rs, ok := s.RootModule().Resources[resourceAddr]
+						if !ok {
+							return fmt.Errorf("not found: %s", resourceAddr)
+						}
+						tableID = rs.Primary.ID
+						if tableID == "" {
+							return fmt.Errorf("empty id for %s", resourceAddr)
+						}
+						return nil
+					},
+				),
+			},
+			{
+				Config: csvConfig,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceAddr, "name", tableName),
+					resource.TestCheckResourceAttr(resourceAddr, "rows_csv_filepath", csvPathHCL),
+					resource.TestCheckResourceAttr(resourceAddr, "rows_record_count", "1"),
+					resource.TestCheckResourceAttrSet(resourceAddr, "rows_csv_content_hash"),
+					resource.TestCheckResourceAttr(resourceAddr, "version", "2"),
+					func(s *terraform.State) error {
+						rs, ok := s.RootModule().Resources[resourceAddr]
+						if !ok {
+							return fmt.Errorf("not found: %s", resourceAddr)
+						}
+						if rs.Primary.ID != tableID {
+							return fmt.Errorf("resource recreated on rows→CSV migrate: was %s, now %s", tableID, rs.Primary.ID)
+						}
+						if v, ok := rs.Primary.Attributes["rows.#"]; ok && v != "0" {
+							return fmt.Errorf("expected nested rows cleared after CSV migrate, got rows.#=%s", v)
+						}
+						return nil
+					},
+				),
+			},
+			{
+				PreConfig: func() {
+					if err := os.WriteFile(csvPath, []byte(csvV2), 0644); err != nil {
+						t.Fatal(err)
+					}
+				},
+				Config: csvConfig,
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceAddr, "rows_record_count", "1"),
+					resource.TestCheckResourceAttrSet(resourceAddr, "rows_csv_content_hash"),
+					resource.TestCheckResourceAttr(resourceAddr, "version", "3"),
+					func(s *terraform.State) error {
+						rs, ok := s.RootModule().Resources[resourceAddr]
+						if !ok {
+							return fmt.Errorf("not found: %s", resourceAddr)
+						}
+						if rs.Primary.ID != tableID {
+							return fmt.Errorf("resource recreated on CSV content update: was %s, now %s", tableID, rs.Primary.ID)
+						}
+						return nil
+					},
+				),
+			},
+		},
+		CheckDestroy: testVerifyBusinessRulesDecisionTablesDestroyed,
+	})
+}
+
+// TestAccResourceBusinessRulesDecisionTableRowUpdateTransientDuplicate reproduces
+// RULES-1907 with a self-contained (non-customer) configuration on the nested-rows
+// path. Two rows are identical across every input column except customer_type. A
+// single apply then shifts them along a chain - VIP->Standard and Standard->Premium
+// - so the row moving to "Standard" wants the input values the other row still has
+// until it is updated. Applied in an unsafe order this briefly leaves two rows with
+// the same input values and the API rejects it with "409 duplicate decision table
+// rows"; with the safe ordering the row moving away is updated first. On the bulk
+// path those two updates must also be separate requests, because uniqueness is
+// checked against the current table.
+func TestAccResourceBusinessRulesDecisionTableRowUpdateTransientDuplicate(t *testing.T) {
+	t.Parallel()
+
+	var (
+		tableResourceLabel  = "test-decision-table-chain"
+		schemaResourceLabel = "test-schema-chain"
+		queueResourceLabel  = "test-queue-chain"
+
+		tableName   = "TF Test DT Chain-" + uuid.NewString()[:8]
+		tableDesc   = "Terraform test decision table transient duplicate"
+		schemaName  = "TF Test Schema Chain-" + uuid.NewString()[:8]
+		schemaDesc  = "Test schema for transient duplicate chain"
+		queueName   = "TF Test Queue Chain-" + uuid.NewString()[:8]
+		resourceRef = "genesyscloud_business_rules_decision_table." + tableResourceLabel
+	)
+
+	// Initial rows: [VIP, Standard] - distinct (they differ only by customer_type).
+	initialRows := generateChainRow(queueResourceLabel, "VIP") +
+		generateChainRow(queueResourceLabel, "Standard")
+
+	// Shifted rows: [Standard, Premium]. The first row moves VIP->Standard onto the
+	// values the second row still has until it moves Standard->Premium. Matching by
+	// position keeps each row's generated row_id, so both are updates (not
+	// add/delete), which is what exercises the update ordering.
+	shiftedRows := generateChainRow(queueResourceLabel, "Standard") +
+		generateChainRow(queueResourceLabel, "Premium")
+
+	baseConfig := generateBusinessRulesSchemaResource(schemaResourceLabel, schemaName, schemaDesc) +
+		generateHomeDivisionReference() +
+		generateRoutingQueueResource(queueResourceLabel, queueName)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:          func() { util.TestAccPreCheck(t) },
+		ProviderFactories: provider.GetProviderFactories(providerResources, providerDataSources),
+		Steps: []resource.TestStep{
+			{
+				// Step 1: create the two distinct rows.
+				Config: baseConfig +
+					generateBusinessRulesDecisionTableResource(
+						tableResourceLabel,
+						tableName,
+						tableDesc,
+						"data.genesyscloud_auth_division_home.home.id",
+						"genesyscloud_business_rules_schema."+schemaResourceLabel+".id",
+						generateColumns(queueResourceLabel),
+						initialRows,
+					),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceRef, "version", "1"),
+					resource.TestCheckResourceAttr(resourceRef, "rows.#", "2"),
+					resource.TestCheckResourceAttr(resourceRef, "rows.0.inputs.0.literal.0.value", "VIP"),
+					resource.TestCheckResourceAttr(resourceRef, "rows.1.inputs.0.literal.0.value", "Standard"),
+				),
+			},
+			{
+				// Step 2: the chain shift in a single apply. This is the step that
+				// 409'd before the fix; it must now succeed.
+				Config: baseConfig +
+					generateBusinessRulesDecisionTableResource(
+						tableResourceLabel,
+						tableName,
+						tableDesc,
+						"data.genesyscloud_auth_division_home.home.id",
+						"genesyscloud_business_rules_schema."+schemaResourceLabel+".id",
+						generateColumns(queueResourceLabel),
+						shiftedRows,
+					),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(resourceRef, "version", "2"),
+					resource.TestCheckResourceAttr(resourceRef, "rows.#", "2"),
+					resource.TestCheckResourceAttr(resourceRef, "rows.0.inputs.0.literal.0.value", "Standard"),
+					resource.TestCheckResourceAttr(resourceRef, "rows.1.inputs.0.literal.0.value", "Premium"),
+				),
+			},
+		},
+		CheckDestroy: testVerifyBusinessRulesDecisionTablesDestroyed,
+	})
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -12,8 +13,10 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 )
+
+var isDynamicPattern = regexp.MustCompile(`^[(\[.*]`)
 
 // Row IDs structured as {table-id}/{key-value}
 func createDatatableRowId(tableId string, keyVal string) string {
@@ -81,7 +84,8 @@ func customizeDatatableRowDiff(ctx context.Context, diff *schema.ResourceDiff, m
 
 	// For each property in the schema, check if a value is set in the config
 	if datatable.Schema != nil && datatable.Schema.Properties != nil {
-		for name, prop := range *datatable.Schema.Properties {
+		for _, name := range datatable.Schema.Properties.Keys() {
+			prop, _ := datatable.Schema.Properties.Get(name)
 			if name == "key" {
 				// Skip setting the key value
 				continue
@@ -130,4 +134,43 @@ func getArchitectDatatableCached(ctx context.Context, tableID string, config *pl
 	}
 	archDatatableCache.Store(tableID, datatable)
 	return datatable, nil
+}
+
+// extractFilterPatterns extracts the regex patterns from the export filter for this resource type.
+func extractFilterPatterns(resourceType string, filter []string) []string {
+	if len(filter) == 0 {
+		return nil
+	}
+
+	prefix := resourceType + "::"
+	patterns := make([]string, 0)
+
+	for _, f := range filter {
+		if !strings.Contains(f, prefix) {
+			continue
+		}
+
+		pattern := f[strings.Index(f, "::")+2:]
+		if pattern != "" {
+			patterns = append(patterns, pattern)
+		}
+	}
+
+	return patterns
+}
+
+// tableMatchesFilter checks if a table name could produce a BlockLabel that matches any of the filter patterns.
+func tableMatchesFilter(tableName string, filterPatterns []string) bool {
+	for _, pattern := range filterPatterns {
+		p := strings.Trim(pattern, "^$")
+
+		if isDynamicPattern.MatchString(p) {
+			return true
+		}
+
+		if strings.HasPrefix(p, tableName) {
+			return true
+		}
+	}
+	return false
 }

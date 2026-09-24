@@ -17,7 +17,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 )
 
 func getAllRoutingUtilization(ctx context.Context, clientConfig *platformclientv2.Configuration) (resourceExporter.ResourceIDMetaMap, diag.Diagnostics) {
@@ -36,7 +36,7 @@ func getAllRoutingUtilization(ctx context.Context, clientConfig *platformclientv
 		}
 		return nil, util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to get %s due to error: %s", ResourceType, err), resp)
 	}
-	resources["0"] = &resourceExporter.ResourceMeta{BlockLabel: "routing_utilization"}
+	resources[ResourceType] = &resourceExporter.ResourceMeta{BlockLabel: "routing_utilization"}
 	return resources, nil
 }
 
@@ -79,6 +79,10 @@ func readRoutingUtilization(ctx context.Context, d *schema.ResourceData, meta in
 			_ = d.Set("label_utilizations", flattenedLabelUtilizations)
 		}
 
+		if orgUtilization.MaxInboundCalls != nil {
+			_ = d.Set("max_inbound_calls", *orgUtilization.MaxInboundCalls)
+		}
+
 		log.Printf("Read Routing Utilization")
 		return cc.CheckState(d)
 	})
@@ -92,10 +96,17 @@ func updateRoutingUtilization(ctx context.Context, d *schema.ResourceData, meta 
 
 	// Retrying on 409s because if a label is created immediately before the utilization update, it can lead to a conflict while the utilization is being updated to handle the new label.
 	diagErr := util.RetryWhen(util.IsStatus409, func() (*platformclientv2.APIResponse, diag.Diagnostics) {
-		_, resp, err := proxy.updateRoutingUtilization(ctx, &platformclientv2.Utilizationrequest{
+		utilizationRequest := &platformclientv2.Utilizationrequest{
 			Utilization:       BuildSdkMediaUtilizations(d),
 			LabelUtilizations: BuildSdkLabelUtilizations(d.Get("label_utilizations").([]interface{})),
-		})
+		}
+
+		if v, ok := d.GetOk("max_inbound_calls"); ok {
+			maxInbound := v.(int)
+			utilizationRequest.MaxInboundCalls = &maxInbound
+		}
+
+		_, resp, err := proxy.updateRoutingUtilization(ctx, utilizationRequest)
 
 		if err != nil {
 			return resp, util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to update Routing Utilization %s error: %s", d.Id(), err), resp)

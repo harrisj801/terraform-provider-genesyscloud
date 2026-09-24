@@ -1,16 +1,25 @@
 package business_rules_decision_table
 
+// @team: RuleBasedDecisions
+// @chat: #rule-based-decisions
+// @pm: Rob Blane
+// @jira: RULES
+// @description: Manages rule-based decision tables for Genesys Cloud. Provides a flexible way to define decision tables with inputs and outputs, and to manage their rows and columns.
+
 import (
 	"fmt"
 	"strconv"
 
 	"strings"
+	"time"
 
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/customdiff"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/provider"
 	resourceExporter "github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/resource_exporter"
 	registrar "github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/resource_register"
+	"github.com/mypurecloud/terraform-provider-genesyscloud/genesyscloud/validators"
 )
 
 const ResourceType = "genesyscloud_business_rules_decision_table"
@@ -147,16 +156,22 @@ func valueSchemaFunc() *schema.Resource {
 func defaultsToSchemaFunc() *schema.Resource {
 	return &schema.Resource{
 		Schema: map[string]*schema.Schema{
+			// value/values/special are mutually exclusive; a column sets exactly one.
+			// Computed lets the provider own the unused siblings (which the legacy SDK
+			// materializes as empty) so plan(null) -> apply("") is not flagged as an
+			// inconsistency and does not produce a phantom ForceNew diff.
 			"value": {
 				Type:        schema.TypeString,
 				Optional:    true,
-				Description: "A default string value for this column, will be cast to appropriate type according to the relevant contract schema property.",
+				Computed:    true,
+				Description: "A default string value for this column, will be cast to appropriate type according to the relevant contract schema property. Mutually exclusive with 'values' and 'special'; set only one per column (enforced by the API).",
 			},
 
 			"values": {
 				Type:        schema.TypeList,
 				Optional:    true,
-				Description: "A default list of string values for this column. Used for stringList data types.",
+				Computed:    true,
+				Description: "A default list of string values for this column. Used for stringList data types. Mutually exclusive with 'value' and 'special'; set only one per column (enforced by the API).",
 				Elem: &schema.Schema{
 					Type: schema.TypeString,
 				},
@@ -165,7 +180,8 @@ func defaultsToSchemaFunc() *schema.Resource {
 			"special": {
 				Type:         schema.TypeString,
 				Optional:     true,
-				Description:  "A default special value enum for this column.Valid values: Wildcard, Null, Empty, CurrentTime.",
+				Computed:     true,
+				Description:  "A default special value enum for this column. Valid values: Wildcard, Null, Empty, CurrentTime. Mutually exclusive with 'value' and 'values'; set only one per column (enforced by the API).",
 				ValidateFunc: validation.StringInSlice([]string{"Wildcard", "Null", "Empty", "CurrentTime"}, false),
 			},
 		},
@@ -186,7 +202,7 @@ func inputColumnSchemaFunc() *schema.Resource {
 				Required:    true,
 				MaxItems:    1,
 				Elem:        &schema.Resource{Schema: defaultsToSchemaFunc().Schema},
-				Description: "Default value configuration. Only one of 'value' or 'special' should be set.",
+				Description: "Default value configuration. Set exactly one of 'value', 'values', or 'special'; they are mutually exclusive (enforced by the API).",
 			},
 			"expression": {
 				Type:        schema.TypeList,
@@ -213,7 +229,7 @@ func outputColumnSchemaFunc() *schema.Resource {
 				Required:    true,
 				MaxItems:    1,
 				Elem:        &schema.Resource{Schema: defaultsToSchemaFunc().Schema},
-				Description: "Default value configuration. Only one of 'value' or 'special' should be set.",
+				Description: "Default value configuration. Set exactly one of 'value', 'values', or 'special'; they are mutually exclusive (enforced by the API).",
 			},
 			"value": {
 				Type:        schema.TypeList,
@@ -251,7 +267,7 @@ func columnsSchemaFunc() *schema.Resource {
 // ResourceBusinessRulesDecisionTable registers the genesyscloud_business_rules_decision_table resource with Terraform
 func ResourceBusinessRulesDecisionTable() *schema.Resource {
 	return &schema.Resource{
-		Description: `Genesys Cloud business rules decision table. Creates version 1 automatically with the specified columns. Columns cannot be modified after creation - requires resource recreation.`,
+		Description: `Genesys Cloud business rules decision table. Creates version 1 automatically with the specified columns. Columns cannot be modified after creation - requires resource recreation. Prefer rows_csv_filepath for row data; nested rows is deprecated.`,
 
 		CreateContext: provider.CreateWithPooledClient(createBusinessRulesDecisionTable),
 		ReadContext:   provider.ReadWithPooledClient(readBusinessRulesDecisionTable),
@@ -260,7 +276,20 @@ func ResourceBusinessRulesDecisionTable() *schema.Resource {
 		Importer: &schema.ResourceImporter{
 			StateContext: schema.ImportStatePassthroughContext,
 		},
+		Timeouts: &schema.ResourceTimeout{
+			Create: schema.DefaultTimeout(120 * time.Minute),
+			Read:   schema.DefaultTimeout(60 * time.Minute),
+			Update: schema.DefaultTimeout(120 * time.Minute),
+			Delete: schema.DefaultTimeout(8 * time.Minute),
+		},
 		SchemaVersion: 1,
+		CustomizeDiff: customdiff.All(
+			customdiff.ComputedIf(
+				"rows_csv_content_hash",
+				validators.ValidateFileContentHashChanged("rows_csv_filepath", "rows_csv_content_hash", S3Enabled),
+			),
+			validateDecisionTableRowsCSV,
+		),
 		Schema: map[string]*schema.Schema{
 			"name": {
 				Description:  "The decision table name.",
@@ -296,11 +325,29 @@ func ResourceBusinessRulesDecisionTable() *schema.Resource {
 				Elem:        columnsSchemaFunc(),
 			},
 			"rows": {
-				Description: "Decision table rows containing input conditions and output results. Rows are added to the latest draft version and published automatically. At least one row is required to publish the table.\n\nIMPORTANT: Row inputs and outputs must follow the same positional order as defined in the columns. The first input/output corresponds to the first column, second to second column, etc.",
-				Type:        schema.TypeList,
-				Required:    true,
-				MinItems:    1,
-				Elem:        rowSchemaFunc(),
+				Description:  "Deprecated. Use rows_csv_filepath instead. Decision table rows containing input conditions and output results. Mutually exclusive with rows_csv_filepath. When used, provide at least one row block.\n\nIMPORTANT: Row inputs and outputs must follow the same positional order as defined in the columns.",
+				Type:         schema.TypeList,
+				Optional:     true,
+				ExactlyOneOf: []string{"rows", "rows_csv_filepath"},
+				Deprecated:   "Use rows_csv_filepath instead. Nested rows will be removed in a later version.",
+				Elem:         rowSchemaFunc(),
+			},
+			"rows_csv_filepath": {
+				Description:  "Path to a CSV of decision table rows. Create and later CSV edits (path or content hash change) each run a decision table CSV import job in Replace mode, then publish the resulting draft version. Mutually exclusive with rows. CSV must have at least one data row. Headers must match the platform export shape (inputs as schema_property_key::Comparator, outputs as schema_property_key). Do not include a rowId column in the on-disk file: Replace import requires a rowId header with empty cell values, which the provider reinjects on upload and strips on export. stringList cells use '||' as the item delimiter (not commas). Queue and other platform object cells use friendly names resolved by the platform on import/export.",
+				Type:         schema.TypeString,
+				Optional:     true,
+				ExactlyOneOf: []string{"rows", "rows_csv_filepath"},
+				ValidateFunc: validators.ValidatePath,
+			},
+			"rows_csv_content_hash": {
+				Description: "Hash of the rows CSV. Stored in state to detect file content changes.",
+				Type:        schema.TypeString,
+				Computed:    true,
+			},
+			"rows_record_count": {
+				Description: "Number of data rows in the CSV at last successful import. Not refreshed from the API on read.",
+				Type:        schema.TypeInt,
+				Computed:    true,
 			},
 
 			"version": {
@@ -382,7 +429,7 @@ func literalValueSchemaFunc() *schema.Resource {
 				Type:             schema.TypeString,
 				Optional:         true,
 				Default:          "",
-				DiffSuppressFunc: suppressNumberFormattingDiff,
+				DiffSuppressFunc: suppressLiteralValueDiff,
 			},
 		},
 	}
@@ -454,14 +501,28 @@ func BusinessRulesDecisionTableExporter() *resourceExporter.ResourceExporter {
 			"rows.outputs.column_id",
 			"rows.row_id",
 			"rows.row_index",
+			"rows_csv_content_hash",
+			"rows_record_count",
+		},
+		CustomFileWriter: resourceExporter.CustomFileWriterSettings{
+			RetrieveAndWriteFilesFunc: DecisionTableRowsExporterResolver,
+			SubDirectory:              "rows",
+		},
+		ThirdPartyRefAttrs: []string{
+			"rows_csv_filepath",
+			"rows_csv_content_hash",
 		},
 		// Note: To export routing queue resources that are referenced in decision tables,
 		// include "genesyscloud_routing_queue" in the export filter resources.
+		//
+		// IMPORTANT: Resolver paths are matched by exact string against the attribute
+		// path the exporter framework computes while walking the config (see
+		// sanitizeConfigMap / sanitizeConfigArray in genesyscloud/tfexporter). That path
+		// is dot-separated attribute names with no array indices and no wildcards.
+		// CSV-backed exports do not emit nested rows; QueueIdResolver applies to column defaults only.
 		CustomAttributeResolver: map[string]*resourceExporter.RefAttrCustomResolver{
 			"columns.outputs.defaults_to.value": {ResolverFunc: QueueIdResolver},
 			"columns.inputs.defaults_to.value":  {ResolverFunc: QueueIdResolver},
-			"rows.*.inputs.*.literal.value":     {ResolverFunc: QueueIdResolver},
-			"rows.*.outputs.*.literal.value":    {ResolverFunc: QueueIdResolver},
 		},
 	}
 }
@@ -486,34 +547,39 @@ func DataSourceBusinessRulesDecisionTable() *schema.Resource {
 	}
 }
 
-// suppressNumberFormattingDiff suppresses diffs when the only difference is number formatting
-// (e.g., "1.0" vs "1", "1.00" vs "1", etc.) for number type literals.
-// This allows users to write "1.0" in their Terraform config while the API returns "1",
-// without causing unnecessary plan diffs.
-func suppressNumberFormattingDiff(k, old, new string, d *schema.ResourceData) bool {
-	// Get the type field from the same resource path
-	typeKey := strings.Replace(k, ".value", ".type", 1)
-	literalType := d.Get(typeKey).(string)
-
-	// Only suppress diffs for number type literals
-	if literalType != "number" {
-		return false
-	}
-
+// suppressLiteralValueDiff suppresses diffs for the following literal value types:
+//   - string: trims leading/trailing whitespace and invisible Unicode characters
+//   - stringList: normalizes comma spacing and trims whitespace from each element
+//   - number: suppresses formatting differences (e.g. "1.0" vs "1")
+func suppressLiteralValueDiff(k, old, new string, d *schema.ResourceData) bool {
 	// If either value is empty, don't suppress (let normal diff handling work)
 	if old == "" || new == "" {
 		return false
 	}
 
-	// Parse both values as floats
-	oldFloat, oldErr := strconv.ParseFloat(old, 64)
-	newFloat, newErr := strconv.ParseFloat(new, 64)
-
-	// If either parsing fails, don't suppress (let normal diff handling work)
-	if oldErr != nil || newErr != nil {
-		return false
+	// Get the type field from the same resource path
+	typeKey := strings.Replace(k, ".value", ".type", 1)
+	literalType := ""
+	if d != nil {
+		if v, ok := d.GetOk(typeKey); ok {
+			literalType = v.(string)
+		}
 	}
 
-	// Suppress diff if the numeric values are equal
-	return oldFloat == newFloat
+	switch literalType {
+	case "number":
+		// Parse both values as floats
+		oldFloat, oldErr := strconv.ParseFloat(old, 64)
+		newFloat, newErr := strconv.ParseFloat(new, 64)
+		// If either parsing fails, don't suppress (let normal diff handling work)
+		if oldErr != nil || newErr != nil {
+			return false
+		}
+		// Suppress diff if the numeric values are equal
+		return oldFloat == newFloat
+	case "string", "stringList":
+		return normalizeLiteralValue(old, literalType) == normalizeLiteralValue(new, literalType)
+	default:
+		return false
+	}
 }

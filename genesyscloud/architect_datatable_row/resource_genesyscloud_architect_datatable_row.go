@@ -19,7 +19,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/mypurecloud/platform-client-sdk-go/v179/platformclientv2"
+	"github.com/mypurecloud/platform-client-sdk-go/v195/platformclientv2"
 )
 
 type Datatableproperty struct {
@@ -32,11 +32,11 @@ type Datatableproperty struct {
 
 // Overriding the SDK Datatable document as it does not allow setting additionalProperties to 'false' as required by the API
 type Jsonschemadocument struct {
-	Schema               *string                       `json:"$schema,omitempty"`
-	VarType              *string                       `json:"type,omitempty"`
-	Required             *[]string                     `json:"required,omitempty"`
-	Properties           *map[string]Datatableproperty `json:"properties,omitempty"`
-	AdditionalProperties *interface{}                  `json:"additionalProperties,omitempty"`
+	Schema               *string                             `json:"$schema,omitempty"`
+	VarType              *string                             `json:"type,omitempty"`
+	Required             *[]string                           `json:"required,omitempty"`
+	Properties           *util.OrderedMap[Datatableproperty] `json:"properties,omitempty"`
+	AdditionalProperties *interface{}                        `json:"additionalProperties,omitempty"`
 }
 
 type Datatable struct {
@@ -56,16 +56,27 @@ func getAllArchitectDatatableRows(ctx context.Context, clientConfig *platformcli
 		return nil, util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to get architect datatables error: %s", err), resp)
 	}
 
+	exportFilter := resourceExporter.ExportFilterFromContext(ctx)
+	resourceFilterPatterns := extractFilterPatterns(ResourceType, exportFilter)
+
 	for _, tableMeta := range *tables {
+		if len(resourceFilterPatterns) > 0 && !tableMatchesFilter(*tableMeta.Name, resourceFilterPatterns) {
+			continue
+		}
+
 		rows, resp, err := archProxy.getAllArchitectDatatableRows(ctx, *tableMeta.Id)
 
 		if err != nil {
 			return nil, util.BuildAPIDiagnosticError(ResourceType, fmt.Sprintf("Failed to get architect Datatable Rows error: %s", err), resp)
 		}
 
+		if rows == nil {
+			continue
+		}
+
 		for _, row := range *rows {
 			if keyVal, ok := row["key"]; ok {
-				keyStr := keyVal.(string) // Keys must be strings
+				keyStr := keyVal.(string)
 				resources[createDatatableRowId(*tableMeta.Id, keyStr)] = &resourceExporter.ResourceMeta{BlockLabel: *tableMeta.Name + "_" + keyStr}
 			}
 		}

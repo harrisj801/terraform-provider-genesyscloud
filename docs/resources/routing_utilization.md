@@ -6,14 +6,18 @@ description: |-
 ---
 # genesyscloud_routing_utilization (Resource)
 
+<!-- This document is automatically generated. Do not edit manually. Make changes to the schema, examples, or apis.md files in examples/resources/ and run 'make docs' to regenerate. -->
+
 Genesys Cloud Org-wide Routing Utilization Settings.
 
 ## API Usage
+
 The following Genesys Cloud APIs are used by this resource. Ensure your OAuth Client has been granted the necessary scopes and permissions to perform these operations:
 
-* [GET /api/v2/routing/utilization](https://developer.mypurecloud.com/api/rest/v2/routing/#get-api-v2-routing-utilization)
-* [PUT /api/v2/routing/utilization](https://developer.mypurecloud.com/api/rest/v2/routing/#put-api-v2-routing-utilization)
-* [DELETE /api/v2/routing/utilization](https://developer.mypurecloud.com/api/rest/v2/routing/#delete-api-v2-routing-utilization)
+* [DELETE /api/v2/routing/utilization](https://developer.genesys.cloud/devapps/api-explorer#delete-api-v2-routing-utilization)
+* [GET /api/v2/routing/utilization](https://developer.genesys.cloud/devapps/api-explorer#get-api-v2-routing-utilization)
+* [PUT /api/v2/routing/utilization](https://developer.genesys.cloud/devapps/api-explorer#put-api-v2-routing-utilization)
+
 ## Permissions and Scopes
 
 The following permissions are required to use this resource:
@@ -77,6 +81,7 @@ resource "genesyscloud_routing_utilization" "org-utilization" {
 - `chat` (Block List, Max: 1) Chat media settings. If not set, this reverts to the default media type settings. (see [below for nested schema](#nestedblock--chat))
 - `email` (Block List, Max: 1) Email media settings. If not set, this reverts to the default media type settings. (see [below for nested schema](#nestedblock--email))
 - `label_utilizations` (Block List) Label utilization settings. If not set, default label settings will be applied. (see [below for nested schema](#nestedblock--label_utilizations))
+- `max_inbound_calls` (Number) Max number of inbound voice calls. This limits the total inbound calls (ACD + non-ACD) an agent can receive.
 - `message` (Block List, Max: 1) Message media settings. If not set, this reverts to the default media type settings. (see [below for nested schema](#nestedblock--message))
 - `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))
 
